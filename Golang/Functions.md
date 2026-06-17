@@ -1,5 +1,10 @@
-Functions are the core unit of behavior in Go. Unlike many languages, Go keeps functions deliberately simple at the syntax level but layers a _lot_ of nuance on top: value semantics, multiple returns, closures, `defer`, variadics, generics, and functions-as-types. This note covers all of it, with runnable examples and the gotchas that bite people in practice.
-## Contents
+# Go — Functions
+
+> **Series:** Go Language Fundamentals **Tags:** #go #golang #functions #closures #defer #panic #generics #programming **Level:** Beginner → Intermediate
+
+---
+
+## Table of Contents
 
 - [[#1. Basic Syntax]]
 - [[#2. Parameters — Go Is Always Pass-By-Value]]
@@ -8,20 +13,24 @@ Functions are the core unit of behavior in Go. Unlike many languages, Go keeps f
 - [[#5. Functions Are Values (First-Class Functions)]]
 - [[#6. Anonymous Functions & Function Literals]]
 - [[#7. Closures]]
-- [[#8. `defer` — Deep Dive]]
-- [[#9. `panic` and `recover`]]
-- [[#10. Generic Functions (Go 1.18+)]]
-- [[#11. `init()` — Package Initialization Functions]]
-- [[#12. `main()` — The Entry Point]]
-- [[#13. Recursion]]
-- [[#14. Methods vs. Functions — Quick Orientation]]
-- [[#15. The Functional Options Pattern]]
-- [[#16. No Function Overloading, No Default Arguments]]
-- [[#17. Order of Evaluation]]
-- [[#18. Common Pitfalls — Quick Reference Table]]
-- [[#19. Performance Notes]]
-- [[#20. Best Practices Checklist]]
-- [[#21. Cheat Sheet — Syntax at a Glance]]
+- [[#8. What is a Handler]]
+- [[#9. What is Middleware — and How the Chain Works]]
+- [[#10. defer — Deep Dive]]
+- [[#11. panic and recover]]
+- [[#12. Generic Functions (Go 1.18+)]]
+- [[#13. init() — Package Initialization Functions]]
+- [[#14. main() — The Entry Point]]
+- [[#15. Recursion]]
+- [[#16. Methods vs. Functions — Quick Orientation]]
+- [[#17. The Functional Options Pattern]]
+- [[#18. No Function Overloading, No Default Arguments]]
+- [[#19. Order of Evaluation]]
+- [[#20. Common Pitfalls — Quick Reference Table]]
+- [[#21. Performance Notes]]
+- [[#22. Best Practices Checklist]]
+- [[#23. Cheat Sheet — Syntax at a Glance]]
+
+---
 
 ## 1. Basic Syntax
 
@@ -59,7 +68,7 @@ func greet() {
 
 This is the single most important semantic fact about Go functions, and the source of most "why did my function not mutate my data?!" confusion.
 
-**Every argument passed to a function is copied.** This is true for `int`, `struct`, arrays, pointers, slices, maps — everything. The _difference_ in behavior comes from **what is being copied**.
+**Every argument passed to a function is copied.** This is true for `int`, `struct`, arrays, pointers, slices, maps — everything. The difference in behavior comes from **what is being copied**.
 
 ### 2.1 Primitives and structs — copied entirely
 
@@ -104,7 +113,7 @@ func main() {
 }
 ```
 
-### 2.3 Arrays — copied entirely (this surprises people coming from C/JS)
+### 2.3 Arrays — copied entirely
 
 ```go
 func zeroOut(arr [3]int) {
@@ -118,7 +127,7 @@ func main() {
 }
 ```
 
-### 2.4 Slices, Maps, Channels — the "header" is copied, but it shares the underlying data
+### 2.4 Slices, Maps, Channels — the header is copied, but it shares the underlying data
 
 A slice is a small struct: `{ pointer, length, capacity }`. That struct gets copied — but the pointer inside it still points to the same backing array.
 
@@ -136,12 +145,11 @@ func main() {
 }
 ```
 
-But **reassigning the slice itself** (changing length/pointer/cap) inside the function does **not** affect the caller's variable, because that only changes the local copy of the header:
+But **reassigning the slice itself** inside the function does **not** affect the caller:
 
 ```go
 func appendOne(s []int) {
-    s = append(s, 99) // may or may not touch shared array, but
-                       // the new header is local — caller never sees it
+    s = append(s, 99) // local header change — caller never sees it
 }
 
 func main() {
@@ -151,19 +159,17 @@ func main() {
 }
 ```
 
-> [!warning] The classic slice-mutation gotcha `append` inside a function is **invisible to the caller** unless the function returns the new slice and the caller reassigns it. This is why so many Go functions look like `func addItem(s []int, item int) []int { return append(s, item) }` — and why `s = addItem(s, 4)` is a required pattern, not a style choice.
-
-Maps behave more simply: a map value is _itself_ a pointer to an internal hash table structure, so mutations like `m[key] = value` or `delete(m, key)` inside a function are always visible to the caller — but reassigning the map variable (`m = map[string]int{}`) is not.
+> [!warning] The classic slice-mutation gotcha `append` inside a function is **invisible to the caller** unless the function returns the new slice and the caller reassigns it. This is why Go functions look like `func addItem(s []int, item int) []int { return append(s, item) }` — and why `s = addItem(s, 4)` is required.
 
 ### 2.5 Summary table
 
-|Type passed|What's copied|Mutation via index/field visible to caller?|Reassignment visible?|
+|Type passed|What's copied|Mutation visible to caller?|Reassignment visible?|
 |---|---|---|---|
 |`int`, `string`, `bool`, `struct`|Full value|N/A|No|
-|Array `[N]T`|Full array (all N elements)|No (operates on copy)|No|
+|Array `[N]T`|Full array|No|No|
 |Pointer `*T`|The pointer (address)|Yes (dereferenced write)|No|
-|Slice `[]T`|Header (ptr, len, cap)|Yes, for existing elements|No (re-slicing/append not seen)|
-|Map|Reference to hashtable|Yes (add/update/delete keys)|No|
+|Slice `[]T`|Header (ptr, len, cap)|Yes, for existing elements|No|
+|Map|Reference to hashtable|Yes (add/update/delete)|No|
 |Channel|Reference|Yes (send/receive)|No|
 
 ---
@@ -179,8 +185,6 @@ func square(x int) int {
 ```
 
 ### 3.2 Multiple return values
-
-This is one of Go's signature features — no need for tuples, output parameters, or wrapper structs for simple cases.
 
 ```go
 func divmod(a, b int) (int, int) {
@@ -207,7 +211,7 @@ func parseAge(s string) (int, error) {
 
 ### 3.3 Named return values
 
-You can name the return values in the signature. This pre-declares variables you can assign to inside the function body, and creates self-documenting signatures:
+You can name the return values in the signature:
 
 ```go
 func divmod(a, b int) (q, r int) {
@@ -219,21 +223,11 @@ func divmod(a, b int) (q, r int) {
 
 ### 3.4 Naked returns — convenient but risky
 
-A bare `return` with named returns sends back whatever the named variables currently hold.
+> [!warning] Naked returns hurt readability in long functions In a 50-line function, a bare `return` gives the reader zero information. Prefer explicit `return q, r` except in very short functions.
 
-```go
-func split(sum int) (x, y int) {
-    x = sum * 4 / 9
-    y = sum - x
-    return
-}
-```
+### 3.5 Named returns + defer — the "magic" interaction
 
-> [!warning] Naked returns hurt readability in long functions. In a 50-line function, `return` on its own gives the reader **zero information** about what's being returned — they have to scroll back to find the last assignment to each named return value. The Go team's own style guidance: naked returns are fine in **short** functions (a handful of lines) and actively discouraged in long ones. Prefer explicit `return q, r`.
-
-### 3.5 Named returns + `defer` — the "magic" interaction
-	
-This is a famous Go idiom and a famous gotcha at the same time: a deferred function **can modify named return values** because they're just variables in the enclosing scope, and `defer` runs _after_ `return` assigns to them but _before_ the function actually exits.
+A deferred function **can modify named return values** because they're variables in the enclosing scope, and `defer` runs after `return` assigns to them but before the function actually exits:
 
 ```go
 func increment() (result int) {
@@ -246,7 +240,13 @@ func increment() (result int) {
 fmt.Println(increment()) // 11, not 10!
 ```
 
-This pattern is the standard way to wrap errors or recover from panics while still being able to "edit" the return value:
+The execution order:
+
+```
+1. return 10        → result = 10
+2. deferred func    → result++ → result = 11
+3. actually returns → caller gets 11
+```
 
 ```go
 func doWork() (err error) {
@@ -260,11 +260,9 @@ func doWork() (err error) {
 }
 ```
 
-> [!tip] If your return values are **unnamed**, a deferred function cannot alter them — there's nothing to assign to. This is the #1 reason to use named returns even when you don't care about the names for documentation purposes.
+> [!tip] If your return values are **unnamed**, a deferred function cannot alter them — there's nothing to assign to.
 
 ### 3.6 The blank identifier `_`
-
-Use `_` to explicitly discard a return value you don't need:
 
 ```go
 value, _ := someFunc() // ignore the error — almost always a code smell!
@@ -293,8 +291,6 @@ sum(1, 2, 3) // 6
 
 ### 4.1 Spreading a slice into variadic args
 
-Use `...` to "unpack" an existing slice as variadic arguments:
-
 ```go
 nums := []int{1, 2, 3, 4}
 total := sum(nums...) // 10
@@ -317,23 +313,15 @@ logMessage("INFO", "user", 42, "logged in")
 
 ### 4.3 `nums ...int` is just `[]int` inside the function
 
-Inside the function body, `nums` has type `[]int` — you can `range` over it, index it, pass it to other functions, check `len(nums)`, etc.
+Inside the function body, `nums` has type `[]int` — you can `range` over it, index it, check `len(nums)`, etc.
 
-> [!warning] Nil vs empty slice for variadic args If you call `sum()` with zero arguments, `nums` inside the function is `nil` (not an empty non-nil slice). For most operations (`len`, `range`, `append`) this is indistinguishable from an empty slice — but if your function does something like `nums == nil` checks or JSON-marshals the slice, the distinction matters (`nil` marshals to `null`, `[]int{}` marshals to `[]`).
-
-### 4.4 The famous example: `fmt.Println`
-
-```go
-func Println(a ...interface{}) (n int, err error)
-```
-
-This is _why_ `fmt.Println(1, "two", 3.0, true)` accepts any number of arguments of any type — `interface{}` (or `any` since Go 1.18) plus variadic is the combination that gives you "accept literally anything, any amount."
+> [!warning] Nil vs empty slice for variadic args If you call `sum()` with zero arguments, `nums` inside the function is `nil`. For most operations this is fine — but `nil` marshals to `null` in JSON while `[]int{}` marshals to `[]`.
 
 ---
 
 ## 5. Functions Are Values (First-Class Functions)
 
-In Go, functions are values like any other — they have types, can be stored in variables, passed as arguments, returned from other functions, and stored in data structures.
+In Go, functions are values — they have types, can be stored in variables, passed as arguments, returned from other functions, and stored in data structures.
 
 ### 5.1 Function types
 
@@ -343,8 +331,6 @@ type BinOp func(int, int) int
 var op BinOp = func(a, b int) int { return a + b }
 fmt.Println(op(2, 3)) // 5
 ```
-
-A variable can hold a reference to _any_ function matching that signature:
 
 ```go
 func add(a, b int) int { return a + b }
@@ -367,12 +353,12 @@ func apply(a, b int, op func(int, int) int) int {
 result := apply(3, 4, func(a, b int) int { return a * b }) // 12
 ```
 
-This is the foundation of Go's `sort.Slice`, middleware patterns, callbacks, and the `strings` package's `*Func` family (`strings.TrimFunc`, `strings.IndexFunc`, etc.):
+This is the foundation of `sort.Slice`, middleware, callbacks, and `strings.TrimFunc`:
 
 ```go
 words := []string{"banana", "kiwi", "apple"}
 sort.Slice(words, func(i, j int) bool {
-    return len(words[i]) < len(words[j]) // sort by length
+    return len(words[i]) < len(words[j])
 })
 // words is now ["kiwi" "apple" "banana"]
 ```
@@ -394,8 +380,6 @@ fmt.Println(triple(5)) // 15
 
 ### 5.4 Functions in data structures — dispatch tables
 
-A very idiomatic Go pattern: a map from string to function, used as a command dispatcher.
-
 ```go
 var operations = map[string]func(int, int) int{
     "add": func(a, b int) int { return a + b },
@@ -408,31 +392,17 @@ if op, ok := operations["add"]; ok {
 }
 ```
 
-### 5.5 Function types satisfying interfaces — the adapter pattern
-
-A function type can have methods, which lets a bare function satisfy an interface. The canonical real-world example is `http.HandlerFunc`:
-
-```go
-type HandlerFunc func(ResponseWriter, *Request)
-
-func (f HandlerFunc) ServeHTTP(w ResponseWriter, r *Request) {
-    f(w, r) // calls the underlying function
-}
-```
-
-This lets you write a plain function and pass it anywhere an `http.Handler` interface is expected, because `HandlerFunc` _is_ both a function type and an interface implementer.
-
-### 5.6 Functions are not comparable (except to `nil`)
+### 5.5 Functions are not comparable (except to nil)
 
 ```go
 var f func()
 fmt.Println(f == nil) // true — valid
 
 f2 := func() {}
-// fmt.Println(f == f2) // COMPILE ERROR: func can only be compared to nil
+// fmt.Println(f == f2) // COMPILE ERROR
 ```
 
-The **zero value** of a function type is `nil`. Calling a `nil` function panics:
+Calling a nil function panics:
 
 ```go
 var f func()
@@ -443,12 +413,7 @@ f() // panic: runtime error: invalid memory address or nil pointer dereference
 
 ## 6. Anonymous Functions & Function Literals
 
-A function literal is a function defined inline, without a name. Anonymous functions are used for:
-
-- Closures (next section)
-- One-off goroutines: `go func() { ... }()`
-- Deferred cleanup: `defer func() { ... }()`
-- Immediately-invoked function expressions (IIFEs)
+A function literal is a function defined inline, without a name.
 
 ```go
 // Assign to a variable
@@ -462,11 +427,13 @@ result := func(a, b int) int {
 fmt.Println(result) // 7
 ```
 
+Common uses: closures, one-off goroutines (`go func() { ... }()`), deferred cleanup (`defer func() { ... }()`).
+
 ---
 
 ## 7. Closures
 
-A closure is a function literal that **references variables from outside its own body**. The function "closes over" those variables — it keeps a live reference to them, not a copy, and they persist as long as the closure is reachable (even after the enclosing function has returned).
+A closure is a function literal that **references variables from outside its own body**. The function "closes over" those variables — it keeps a live reference to them, not a copy, and they persist as long as the closure is reachable.
 
 ### 7.1 The classic counter
 
@@ -488,11 +455,15 @@ fmt.Println(c1()) // 3
 fmt.Println(c2()) // 1 — independent state, separate closure
 ```
 
-Each call to `makeCounter()` creates a **new** `count` variable on the heap (Go's escape analysis moves it there automatically because the closure outlives the function). `c1` and `c2` each close over their own independent `count`.
+`makeCounter` has finished — normally `count` would be gone. But the returned function still holds a reference to it. Go moves `count` to the heap automatically so it survives.
 
-### 7.2 Shared state between multiple closures
+### 7.2 Why each closure gets its own copy
 
-If two closures are created in the same scope, they share the _same_ captured variable:
+Each call to `makeCounter` creates a **new** `count` variable. `c1` and `c2` close over their own independent `count` — they never share state.
+
+### 7.3 Shared state between multiple closures
+
+If two closures are created in the **same scope**, they share the same captured variable:
 
 ```go
 func makePair() (func(), func() int) {
@@ -505,75 +476,49 @@ func makePair() (func(), func() int) {
 inc, get := makePair()
 inc()
 inc()
-fmt.Println(get()) // 2
+fmt.Println(get()) // 2 — both closures share the same count
 ```
 
-### 7.3 The loop variable capture gotcha (version-dependent!)
+### 7.4 The loop variable capture gotcha
 
-This is one of the **most notorious gotchas in Go history**, and the language semantics actually _changed_ in **Go 1.22 (Feb 2024)**.
-
-**Go 1.22 and later** — each iteration of a `for` loop gets its **own** copy of the loop variable:
+**Go 1.22+** — each iteration gets its own copy of the loop variable (safe):
 
 ```go
 funcs := make([]func(), 3)
 for i := 0; i < 3; i++ {
     funcs[i] = func() { fmt.Println(i) }
 }
-for _, f := range funcs {
-    f()
-}
 // Go 1.22+: prints 0, 1, 2
 ```
 
-**Before Go 1.22** — there was a **single shared `i`** variable reused across all iterations. By the time the closures ran, `i` had its final post-loop value:
+**Before Go 1.22** — one shared `i` variable, all closures see the final value:
 
 ```go
-// Pre-1.22 behavior: prints 3, 3, 3
+// Pre-1.22: prints 3, 3, 3
 ```
 
-> [!warning] Why this still matters Even though Go 1.22+ "fixed" this, you'll still encounter:
-> 
-> - Old code/tutorials relying on the old behavior (rare, but exists)
-> - Modules built with `go 1.21` or earlier in `go.mod` — the loop semantics are tied to the `go` directive version in `go.mod`, not just your compiler version!
-> - Interview questions and code review discussions that assume the old behavior
-> 
-> **The defensive pattern** (still widely seen and still 100% correct on any version) is to shadow the variable inside the loop body:
-> 
-> ```go
-> for i := 0; i < 3; i++ {
->     i := i // create a new variable scoped to this iteration
->     funcs[i] = func() { fmt.Println(i) }
-> }
-> ```
+> [!warning] The loop semantics are tied to the `go` directive in `go.mod`, not just your compiler version. Old codebases with `go 1.21` still use the old behavior even with a newer compiler.
 
-### 7.4 The same gotcha with `range` over slices
+The defensive pattern (works on any version):
 
 ```go
-items := []string{"a", "b", "c"}
-var funcs []func()
-for _, item := range items {
-    funcs = append(funcs, func() { fmt.Println(item) })
+for i := 0; i < 3; i++ {
+    i := i // shadow — new variable per iteration
+    funcs[i] = func() { fmt.Println(i) }
 }
-for _, f := range funcs {
-    f()
-}
-// Go 1.22+: a, b, c
-// Pre-1.22:  c, c, c
 ```
 
-### 7.5 Closures and goroutines — a live production bug pattern
-
-This is the same root issue but appears constantly in concurrent code, **and pre-1.22 it caused real race conditions**:
+### 7.5 Closures and goroutines
 
 ```go
-// DANGEROUS on Go < 1.22 (and still worth being explicit about):
+// DANGEROUS on Go < 1.22
 for _, url := range urls {
     go func() {
-        fetch(url) // pre-1.22: all goroutines might see the SAME final `url`
+        fetch(url) // pre-1.22: all goroutines may see the SAME final url
     }()
 }
 
-// Always-safe version (pass as argument — copies the value):
+// Always-safe — pass as argument, copies the value
 for _, url := range urls {
     go func(u string) {
         fetch(u)
@@ -581,15 +526,273 @@ for _, url := range urls {
 }
 ```
 
-> [!tip] Even on Go 1.22+, passing loop values explicitly as function arguments (rather than relying on closure capture) remains a good habit — it's self-documenting and version-independent.
+---
+
+## 8. What is a Handler
+
+A **handler** is a function that is called **in response to an event**. You register it somewhere — a router, an event system, a channel — and the system calls it for you when the event occurs. You don't call the handler yourself.
+
+In Go's HTTP world, a handler has this exact signature:
+
+```go
+func(w http.ResponseWriter, r *http.Request)
+// w = where you write the response (what goes back to the client)
+// r = the incoming request (URL, headers, body, method)
+```
+
+A concrete example:
+
+```go
+func getUsers(w http.ResponseWriter, r *http.Request) {
+    // this is the handler — it runs when someone visits /users
+    users := fetchUsersFromDB()
+    json.NewEncoder(w).Encode(users)
+}
+
+// Register it — "when someone requests /users, call getUsers"
+http.HandleFunc("/users", getUsers)
+```
+
+`getUsers` doesn't know when it will be called, or by whom. The HTTP server calls it for you every time a request to `/users` comes in.
+
+### What a handler receives
+
+`r *http.Request` gives you everything about the incoming request:
+
+```go
+func handler(w http.ResponseWriter, r *http.Request) {
+    fmt.Println(r.Method)          // "GET", "POST", "DELETE" etc.
+    fmt.Println(r.URL.Path)        // "/users/42"
+    fmt.Println(r.URL.Query())     // ?page=2&limit=10
+    fmt.Println(r.Header.Get("Authorization"))  // "Bearer token123"
+
+    // read the request body (for POST/PUT)
+    body, _ := io.ReadAll(r.Body)
+}
+```
+
+### What a handler writes
+
+`w http.ResponseWriter` is where you write the response back to the client:
+
+```go
+func handler(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(200)                    // status code
+    w.Write([]byte(`{"status": "ok"}`))   // body
+}
+```
+
+### http.HandlerFunc — the type
+
+Go defines a named type for handler functions:
+
+```go
+type HandlerFunc func(ResponseWriter, *Request)
+```
+
+This means your handler function IS a value — you can pass it around, wrap it, store it in a variable, all because functions are first-class in Go.
+
+```go
+var h http.HandlerFunc = getUsers   // store it in a variable
+h(w, r)                             // call it directly
+```
 
 ---
 
-## 8. `defer` — Deep Dive
+## 9. What is Middleware — and How the Chain Works
 
-`defer` schedules a function call to run **after** the surrounding function returns (but before it actually hands control back to its caller). Deferred calls run in **LIFO (last-in, first-out)** order.
+### The problem
 
-### 8.1 Basic usage and LIFO order
+You have 10 endpoints and need to log every request, check authentication, and track response times — without copying that code into every handler.
+
+### What middleware is
+
+Middleware is a function that:
+
+1. Takes a handler as input
+2. Returns a new handler that does something extra before and/or after calling the original
+
+```go
+func withLogging(next http.HandlerFunc) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        log.Printf("→ %s %s", r.Method, r.URL.Path)   // BEFORE
+        next(w, r)                                      // call original handler
+        log.Printf("← done")                           // AFTER
+    }
+}
+```
+
+The key insight: `withLogging` returns a **new function** that wraps `next`. The original handler is untouched — it has no idea logging is happening.
+
+### How `next` works — the handoff
+
+`next` is just a captured variable — it's the handler you passed in. When the middleware calls `next(w, r)`, it's calling the original handler and passing the same `w` and `r` along:
+
+```go
+func withLogging(next http.HandlerFunc) http.HandlerFunc {
+    //              ↑
+    //   next = getUsers (captured here)
+
+    return func(w http.ResponseWriter, r *http.Request) {
+        log.Println("before")
+        next(w, r)   // ← calls getUsers(w, r)
+        log.Println("after")
+    }
+}
+
+http.HandleFunc("/users", withLogging(getUsers))
+//                                     ↑
+//              next = getUsers is locked in at registration time
+```
+
+When a request comes in, the flow is:
+
+```
+request arrives
+    ↓
+withLogging's returned function runs
+    ↓
+logs "before"
+    ↓
+next(w, r) → calls getUsers(w, r)
+    ↓
+getUsers does its work, writes response
+    ↓
+back in withLogging
+    ↓
+logs "after"
+    ↓
+response sent to client
+```
+
+### Stacking middleware — the chain
+
+You can wrap multiple middleware together:
+
+```go
+func withAuth(next http.HandlerFunc) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        token := r.Header.Get("Authorization")
+        if token == "" {
+            http.Error(w, "unauthorized", 401)
+            return   // stops here — next is NEVER called
+        }
+        next(w, r)   // auth passed — continue to actual handler
+    }
+}
+
+// Stack: logging wraps auth wraps handler
+http.HandleFunc("/users", withLogging(withAuth(getUsers)))
+```
+
+Reading inside-out: `withAuth(getUsers)` creates an auth-protected version of getUsers. `withLogging(...)` wraps that with logging.
+
+Request flow through the chain:
+
+```
+request
+    ↓
+withLogging    → logs "before"
+    ↓
+withAuth       → checks token
+    ↓               if no token: writes 401, returns — chain STOPS here
+getUsers       → does the work
+    ↓
+withAuth       → (nothing after next)
+    ↓
+withLogging    → logs "after"
+    ↓
+response
+```
+
+### Middleware can stop the chain
+
+If middleware doesn't call `next`, the chain stops there:
+
+```go
+func withAuth(next http.HandlerFunc) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        if !isAuthenticated(r) {
+            http.Error(w, "unauthorized", 401)
+            return   // next is never called — handler never runs
+        }
+        next(w, r)
+    }
+}
+```
+
+The client gets a 401 and the request never reaches the actual handler.
+
+### Why it's a closure
+
+The inner function returned by `withLogging` is a closure — it captures `next` from the outer scope:
+
+```go
+func withLogging(next http.HandlerFunc) http.HandlerFunc {
+    // next is captured here ↓
+    return func(w http.ResponseWriter, r *http.Request) {
+        log.Println("before")
+        next(w, r)   // uses captured next — still accessible here
+    }
+}
+```
+
+When `withLogging(getUsers)` is called, `next` = `getUsers` is locked in. The returned function remembers it forever — every request that comes in calls the right handler.
+
+### A complete example
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+    "net/http"
+    "time"
+)
+
+// Middleware 1: logging
+func withLogging(next http.HandlerFunc) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        start := time.Now()
+        log.Printf("→ %s %s", r.Method, r.URL.Path)
+        next(w, r)
+        log.Printf("← %s %s took %v", r.Method, r.URL.Path, time.Since(start))
+    }
+}
+
+// Middleware 2: authentication
+func withAuth(next http.HandlerFunc) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        token := r.Header.Get("Authorization")
+        if token != "secret-token" {
+            http.Error(w, "unauthorized", http.StatusUnauthorized)
+            return
+        }
+        next(w, r)
+    }
+}
+
+// The actual handler — knows nothing about logging or auth
+func getUsers(w http.ResponseWriter, r *http.Request) {
+    fmt.Fprintln(w, `{"users": ["Alice", "Bob"]}`)
+}
+
+func main() {
+    // Each request: logging → auth → handler
+    http.HandleFunc("/users", withLogging(withAuth(getUsers)))
+    http.ListenAndServe(":8080", nil)
+}
+```
+
+---
+
+## 10. defer — Deep Dive
+
+`defer` schedules a function call to run **after** the surrounding function returns. Deferred calls run in **LIFO (last-in, first-out)** order.
+
+### 10.1 Basic usage and LIFO order
 
 ```go
 func main() {
@@ -605,14 +808,12 @@ func main() {
 // 1
 ```
 
-### 8.2 Arguments are evaluated immediately; the call is deferred
-
-This trips up almost everyone at least once:
+### 10.2 Arguments are evaluated immediately
 
 ```go
 func main() {
     i := 0
-    defer fmt.Println("deferred, i =", i) // i is evaluated NOW → captures 0
+    defer fmt.Println("deferred, i =", i) // i captured as 0 NOW
     i++
     fmt.Println("current i =", i)
 }
@@ -621,12 +822,12 @@ func main() {
 // deferred, i = 0
 ```
 
-If you instead defer a **closure**, the closure's _body_ runs later and reads the variable's value **at that later time**:
+Closure reads value when it runs, not when registered:
 
 ```go
 func main() {
     i := 0
-    defer func() { fmt.Println("deferred, i =", i) }() // body runs later, reads i then
+    defer func() { fmt.Println("deferred, i =", i) }() // reads i later
     i++
     fmt.Println("current i =", i)
 }
@@ -635,7 +836,7 @@ func main() {
 // deferred, i = 1
 ```
 
-### 8.3 The canonical use case: guaranteed cleanup
+### 10.3 The canonical use case: guaranteed cleanup
 
 ```go
 func readFile(path string) ([]byte, error) {
@@ -643,31 +844,25 @@ func readFile(path string) ([]byte, error) {
     if err != nil {
         return nil, err
     }
-    defer f.Close() // runs no matter how the function exits — error, panic, normal return
+    defer f.Close() // always runs — even on panic or early return
 
     return io.ReadAll(f)
 }
 ```
 
-### 8.4 `defer` inside loops — resource exhaustion gotcha
+### 10.4 defer inside loops — resource exhaustion gotcha
 
 ```go
+// BAD — all files stay open until processAll returns
 func processAll(paths []string) error {
     for _, p := range paths {
-        f, err := os.Open(p)
-        if err != nil {
-            return err
-        }
-        defer f.Close() // BAD: all files stay open until processAll RETURNS, not per-iteration!
-        // ... process f ...
+        f, _ := os.Open(p)
+        defer f.Close() // stacks up — all 1000 files open at once!
     }
     return nil
 }
-```
 
-If `paths` has thousands of entries, you'll hold thousands of open file descriptors simultaneously and likely hit the OS limit. **Fix**: wrap the loop body in its own function so `defer` fires each iteration:
-
-```go
+// GOOD — extract to a function so defer fires per iteration
 func processAll(paths []string) error {
     for _, p := range paths {
         if err := processOne(p); err != nil {
@@ -683,20 +878,15 @@ func processOne(path string) error {
         return err
     }
     defer f.Close() // fires when processOne returns — once per file
-    // ... process f ...
     return nil
 }
 ```
 
-### 8.5 `defer` has a small but nonzero cost
-
-Each `defer` historically required a small heap allocation and bookkeeping. Since Go 1.14, the compiler "open-codes" most `defer` calls (inlining the cleanup directly), making them nearly free in common cases. Still, in extremely hot loops, avoid `defer` inside the loop body if performance profiling shows it matters — but **don't prematurely optimize this**; readability/correctness wins almost always.
-
 ---
 
-## 9. `panic` and `recover`
+## 11. panic and recover
 
-### 9.1 `panic` — stops normal execution
+### panic — stops normal execution
 
 ```go
 func mustPositive(n int) int {
@@ -709,42 +899,54 @@ func mustPositive(n int) int {
 
 When a function panics:
 
-1. Execution of the function stops immediately.
-2. Any deferred functions in that function run (in LIFO order).
-3. The panic propagates up to the caller, which also stops and runs its defers — and so on up the call stack.
-4. If nothing recovers, the program crashes with a stack trace.
+1. Execution stops immediately
+2. Deferred functions run (LIFO)
+3. Panic propagates up the call stack
+4. If nothing recovers — program crashes with stack trace
 
-### 9.2 `recover` — only works inside a deferred function
-
-`recover()` stops the panic propagation and returns the value passed to `panic()`. **It only has an effect when called directly inside a deferred function** during an active panic. Calling it anywhere else simply returns `nil` and does nothing.
+### recover — only works inside a deferred function
 
 ```go
 func safeDivide(a, b int) (result int, err error) {
     defer func() {
         if r := recover(); r != nil {
-            err = fmt.Errorf("recovered from panic: %v", r)
+            err = fmt.Errorf("recovered: %v", r)
         }
     }()
-    return a / b, nil // panics with "division by zero" if b == 0
+    return a / b, nil
 }
 
 r, err := safeDivide(10, 0)
-fmt.Println(r, err) // 0 recovered from panic: runtime error: integer divide by zero
+fmt.Println(r, err) // 0 recovered: runtime error: integer divide by zero
 ```
 
-### 9.3 `panic`/`recover` are NOT exceptions — use sparingly
-
-> [!warning] Go idiom: errors for expected failure, panic for programmer bugs Idiomatic Go uses **`error` return values** for anything an honest caller might need to handle (file not found, invalid input, network timeout). `panic` is reserved for **unrecoverable programmer errors** — nil pointer dereference, index out of range, broken invariants — situations that indicate a _bug_, not a normal failure mode.
-> 
-> A common exception: libraries sometimes use `panic`/`recover` _internally_ to unwind deep recursive parsers cleanly, then recover at the top level and convert to a normal `error` — as long as the panic never escapes the package's public API.
+> [!warning] panic/recover are NOT exceptions Use `error` return values for anything a caller might reasonably handle. `panic` is for unrecoverable programmer bugs — nil pointer, broken invariants, index out of range.
 
 ---
 
-## 10. Generic Functions (Go 1.18+)
+## 12. Generic Functions (Go 1.18+)
 
-Generics let a single function work across multiple types while preserving type safety (no `interface{}`/`any` + type assertions needed).
+Generics let a single function work across multiple types while preserving type safety — no `interface{}`/`any` + type assertions needed.
 
-### 10.1 Basic syntax — type parameters
+### 12.1 The problem they solve
+
+Without generics, the same logic has to be duplicated per type:
+
+```go
+func MaxInt(a, b int) int {
+    if a > b { return a }
+    return b
+}
+
+func MaxFloat(a, b float64) float64 {
+    if a > b { return a }
+    return b
+}
+```
+
+Generics let you write this once.
+
+### 12.2 Basic syntax — type parameters
 
 ```go
 func Max[T cmp.Ordered](a, b T) T {
@@ -753,7 +955,18 @@ func Max[T cmp.Ordered](a, b T) T {
     }
     return b
 }
+```
 
+Breaking down the signature:
+
+```
+func Max [T cmp.Ordered] (a, b T) T
+         ↑                  ↑      ↑
+    type parameter      uses T   returns T
+    + constraint
+```
+
+```go
 fmt.Println(Max(3, 5))       // 5  (T = int)
 fmt.Println(Max(2.5, 1.1))   // 2.5 (T = float64)
 fmt.Println(Max("a", "b"))   // "b" (T = string)
@@ -761,45 +974,56 @@ fmt.Println(Max("a", "b"))   // "b" (T = string)
 
 `[T cmp.Ordered]` declares a type parameter `T` constrained to types supporting `<`, `>`, etc. (`cmp.Ordered` lives in the standard `cmp` package since Go 1.21).
 
-### 10.2 Type inference — usually you don't write `[int]` etc.
+### 12.3 Type inference — usually you don't write `[int]` etc.
 
 ```go
-Max(3, 5)        // T inferred as int
-Max[float64](1, 2) // explicit instantiation also allowed, sometimes required
-                    // when args alone don't disambiguate T
+Max(3, 5)           // T inferred as int
+Max[float64](1, 2)  // explicit instantiation — sometimes required
+                     // when args alone don't disambiguate T
 ```
 
-### 10.3 Common built-in constraints
+### 12.4 Constraints — what limits T
 
-|Constraint|Meaning|
-|---|---|
-|`any`|Alias for `interface{}` — no constraint at all|
-|`comparable`|Types supporting `==` and `!=` (usable as map keys)|
-|`cmp.Ordered`|Types supporting `<, <=, >, >=` (numbers, strings)|
-
-### 10.4 A generic slice utility — `Filter`
+A constraint defines what operations are allowed on `T`. Without one, you can't assume anything:
 
 ```go
-func Filter[T any](items []T, predicate func(T) bool) []T {
-    var result []T
+func Broken[T any](a, b T) bool {
+    return a > b   // compile error — any doesn't guarantee > works
+}
+```
+
+### 12.5 Built-in predeclared constraints
+
+```go
+any           // no constraint — accepts literally anything, alias for interface{}
+comparable    // supports == and != (required for map keys)
+```
+
+```go
+func Contains[T comparable](items []T, target T) bool {
     for _, item := range items {
-        if predicate(item) {
-            result = append(result, item)
+        if item == target {   // comparable guarantees == works
+            return true
         }
     }
-    return result
+    return false
 }
 
-nums := []int{1, 2, 3, 4, 5, 6}
-evens := Filter(nums, func(n int) bool { return n%2 == 0 })
-// evens = [2 4 6]
+Contains([]int{1, 2, 3}, 2)        // true
+Contains([]string{"a", "b"}, "c")  // false
 ```
 
-### 10.5 Custom interface constraints
+### 12.6 Standard library constraints — `cmp` package
+
+```go
+cmp.Ordered    // <, <=, >, >= — numbers and strings
+```
+
+### 12.7 Custom union constraints — listing specific types
 
 ```go
 type Number interface {
-    int | int64 | float64
+    int | int8 | int16 | int32 | int64 | float32 | float64
 }
 
 func Sum[T Number](nums []T) T {
@@ -814,11 +1038,146 @@ Sum([]int{1, 2, 3})         // 6
 Sum([]float64{1.5, 2.5})    // 4.0
 ```
 
-> [!tip] When to reach for generics Generics shine for **container/algorithm code** (`Map`, `Filter`, `Reduce`, generic data structures like sets and trees). For most everyday application code, plain functions with concrete types remain simpler and more idiomatic — Go's standard library itself uses generics sparingly (`slices`, `maps` packages being the main examples).
+The `|` means "any one of these types" — `T` can be any of the listed types, and the operations used (`+=`) are guaranteed to work because all of them support it.
+
+### 12.8 Constraints with underlying types — the `~` operator
+
+```go
+type Number interface {
+    ~int | ~int64 | ~float64
+}
+```
+
+`~` means "this type, or anything whose **underlying type** is this." This matters because Go lets you define named types based on others:
+
+```go
+type Celsius float64   // underlying type is float64
+
+temps := []Celsius{20.5, 21.0}
+Sum(temps)   // works because ~float64 matches Celsius too
+```
+
+> [!warning] Without `~`, named types don't satisfy the constraint `type Number interface { int | float64 }` (no `~`) would reject `Celsius` even though it behaves identically to `float64`. The `~` is what allows custom named types to satisfy a constraint based on their underlying type.
+
+### 12.9 Constraints with method requirements
+
+A constraint can require specific methods, just like a regular interface:
+
+```go
+type Stringer interface {
+    String() string
+}
+
+func PrintAll[T Stringer](items []T) {
+    for _, item := range items {
+        fmt.Println(item.String())
+    }
+}
+```
+
+`T` must implement `String() string` — this works exactly like a normal interface constraint.
+
+### 12.10 Combining type lists AND methods
+
+```go
+type Number interface {
+    ~int | ~float64
+    String() string   // must ALSO implement this
+}
+```
+
+`T` must be based on `int` or `float64`, AND have a `String()` method.
+
+### 12.11 Multiple type parameters
+
+Functions can have more than one type parameter — they don't need to be related:
+
+```go
+func Map[T, U any](items []T, fn func(T) U) []U {
+    result := make([]U, len(items))
+    for i, item := range items {
+        result[i] = fn(item)
+    }
+    return result
+}
+
+nums := []int{1, 2, 3}
+strs := Map(nums, func(n int) string {
+    return fmt.Sprintf("num-%d", n)
+})
+// ["num-1" "num-2" "num-3"]
+```
+
+`T` is the input type, `U` is the output type — Go infers both from how you call the function.
+
+```go
+func Keys[K comparable, V any](m map[K]V) []K {
+    keys := make([]K, 0, len(m))
+    for k := range m {
+        keys = append(keys, k)
+    }
+    return keys
+}
+```
+
+### 12.12 Linked container constraints — `S ~[]E`
+
+This pattern links a slice type to its element type — used in the real standard library `slices` package:
+
+```go
+func SumSlice[S ~[]E, E Number](nums S) E {
+    var total E
+    for _, n := range nums {
+        total += n
+    }
+    return total
+}
+```
+
+`S` represents "any slice type," `E` represents its element type. This lets the function work on both a plain `[]int` and a custom named slice type like `type Scores []int`.
+
+### 12.13 Quick reference — kinds of type parameters
+
+|Kind|Example|What it allows|
+|---|---|---|
+|`any`|`[T any]`|Anything at all|
+|`comparable`|`[T comparable]`|`==`, `!=` — usable as map key|
+|`cmp.Ordered`|`[T cmp.Ordered]`|`<`, `<=`, `>`, `>=`|
+|Union|`int \| float64`|Exactly these types|
+|Underlying (`~`)|`~int \| ~float64`|These types or anything based on them|
+|Method requirement|`interface { String() string }`|Must implement these methods|
+|Multiple params|`[T, U any]`|Independent types, often linked by a function|
+|Linked container|`[S ~[]E, E any]`|A slice type and its element type together|
+
+### 12.14 A practical generic — Filter
+
+```go
+func Filter[T any](items []T, predicate func(T) bool) []T {
+    var result []T
+    for _, item := range items {
+        if predicate(item) {
+            result = append(result, item)
+        }
+    }
+    return result
+}
+
+nums := []int{1, 2, 3, 4, 5, 6}
+evens := Filter(nums, func(n int) bool { return n%2 == 0 })
+// [2 4 6]
+
+names := []string{"Alice", "Bob", "Anna"}
+aNames := Filter(names, func(s string) bool { return strings.HasPrefix(s, "A") })
+// [Alice Anna]
+```
+
+Same `Filter` function works on `[]int`, `[]string`, or any slice type — no duplication needed.
+
+> [!tip] When to reach for generics Generics shine for **container/algorithm code** (`Map`, `Filter`, `Reduce`, generic data structures like sets and trees). For most everyday application code, plain functions with concrete types remain simpler and more idiomatic. In everyday Go code you'll mostly use `any`, `comparable`, and simple union constraints (`int | float64`) — `~` and linked container constraints (`S ~[]E`) mainly show up when writing generic library code meant to work with custom named types. Go's own standard library uses generics sparingly — `slices` and `maps` packages being the main examples.
 
 ---
 
-## 11. `init()` — Package Initialization Functions
+## 13. init() — Package Initialization Functions
 
 ```go
 func init() {
@@ -826,11 +1185,10 @@ func init() {
 }
 ```
 
-- Takes **no arguments** and returns **nothing**.
-- A single file or package can have **multiple `init()` functions**.
-- Run order: package-level variable initializers run first, then `init()` functions, in the order they appear in the source (within a file, top to bottom; across files, in the order the compiler processes them — by filename, for the standard `gc` compiler).
-- Across packages: a package's `init()` functions run only after all of its imported packages' `init()` functions have completed — dependency order is guaranteed.
-- `main()`'s package `init()` functions (if any) run last, immediately before `main()` itself.
+- Takes no arguments, returns nothing
+- A single file or package can have **multiple `init()` functions**
+- Package-level variables initialize first, then `init()`, then `main()`
+- Across packages: a package's `init()` runs after all imported packages' `init()` functions
 
 ```go
 var config Config
@@ -840,15 +1198,15 @@ func init() {
 }
 
 func main() {
-    fmt.Println(config) // config is already populated
+    fmt.Println(config) // already populated
 }
 ```
 
-> [!warning] Use `init()` sparingly Overuse of `init()` makes initialization order implicit and hard to trace, hides dependencies, and complicates testing (init runs even when you just want to import a package for one helper). Prefer explicit constructor functions (`NewServer(...)`, `LoadConfig(...)`) called from `main()` wherever practical.
+> [!warning] Use `init()` sparingly Overuse makes initialization order implicit and hard to trace. Prefer explicit constructor functions called from `main()`.
 
 ---
 
-## 12. `main()` — The Entry Point
+## 14. main() — The Entry Point
 
 ```go
 func main() {
@@ -856,18 +1214,18 @@ func main() {
 }
 ```
 
-- Exists only in `package main`.
-- Takes no arguments, returns nothing.
-- Command-line args are accessed via `os.Args`, not function parameters.
-- When `main()` returns, the program exits with status 0 (success) — unless `os.Exit(n)` was called explicitly with a different code.
+- Exists only in `package main`
+- Takes no arguments, returns nothing
+- Command-line args accessed via `os.Args`
+- When `main()` returns, program exits with status 0
 
-> [!warning] `os.Exit` skips deferred functions! `defer` statements in `main()` (or anywhere up the stack) **do not run** if `os.Exit()` is called — it terminates immediately. This is a common source of "my cleanup didn't run" bugs.
+> [!warning] `os.Exit` skips deferred functions `defer` statements do **not** run if `os.Exit()` is called — it terminates immediately.
 
 ---
 
-## 13. Recursion
+## 15. Recursion
 
-Go supports recursion normally — a function can call itself.
+Go supports recursion — a function calling itself:
 
 ```go
 func factorial(n int) int {
@@ -878,73 +1236,67 @@ func factorial(n int) int {
 }
 ```
 
-### 13.1 Mutual recursion
+### Mutual recursion
 
 ```go
 func isEven(n int) bool {
-    if n == 0 {
-        return true
-    }
+    if n == 0 { return true }
     return isOdd(n - 1)
 }
 
 func isOdd(n int) bool {
-    if n == 0 {
-        return false
-    }
+    if n == 0 { return false }
     return isEven(n - 1)
 }
 ```
 
-### 13.2 Stack growth — Go goroutine stacks are dynamic
+### Stack growth
 
-Unlike languages with a fixed call stack size, **goroutine stacks start small (a few KB) and grow automatically** as needed, up to a default maximum of **1 GB on 64-bit systems** (configurable via `debug.SetMaxStack`). This means moderately deep recursion that would blow a fixed C-style stack is usually fine in Go — but extremely deep or unbounded recursion will still eventually panic with `fatal error: stack overflow`, and the program **cannot recover from a stack overflow** (it's not a normal panic).
+Go goroutine stacks start small (a few KB) and **grow automatically** up to 1 GB on 64-bit systems. Moderately deep recursion is fine. Unbounded recursion will panic with `fatal error: stack overflow` — which cannot be recovered.
 
-> [!tip] No tail-call optimization Go's compiler does **not** perform tail-call optimization. A "tail-recursive" function in Go still consumes stack frames for every call. If you need to process huge datasets recursively, consider converting to an explicit loop with a stack/slice, or using iteration instead.
+> [!tip] No tail-call optimization Go does not perform TCO. Very deep recursion still consumes one stack frame per call. For huge datasets, prefer explicit iteration with a stack/slice.
 
 ---
 
-## 14. Methods vs. Functions — Quick Orientation
+## 16. Methods vs. Functions — Quick Orientation
 
-Methods are technically a special case of functions: a function with a **receiver** argument, declared between `func` and the method name.
+Methods are functions with a **receiver** argument:
 
 ```go
 type Rectangle struct{ Width, Height float64 }
 
-// Value receiver — operates on a COPY of the Rectangle
+// Value receiver — operates on a COPY
 func (r Rectangle) Area() float64 {
     return r.Width * r.Height
 }
 
-// Pointer receiver — operates on the ORIGINAL via a pointer
+// Pointer receiver — operates on the ORIGINAL
 func (r *Rectangle) Scale(factor float64) {
     r.Width *= factor
     r.Height *= factor
 }
 ```
 
-Key points (full depth belongs in a dedicated Methods/Interfaces note, but the essentials):
-
-- **Value receiver**: the method gets a copy; mutations inside don't affect the original. Use for small, immutable-feeling reads (`Area()`, `String()`).
-- **Pointer receiver**: the method gets a pointer; mutations are visible to the caller. Required for any method that needs to modify the receiver, and conventionally used for large structs to avoid copying.
-- **Method sets and interfaces**: a value of type `T` has access to methods with receiver `T` only. A value of type `*T` has access to methods with receiver `T` _and_ `*T`. This matters for interface satisfaction — if `Scale` has a pointer receiver, only `*Rectangle` (not `Rectangle`) satisfies an interface requiring `Scale()`.
-- **Method values**: `r.Area` (without calling it) is a function value bound to `r` — `f := r.Area; f()` works just like `r.Area()`.
-- **Method expressions**: `Rectangle.Area` is a function with the receiver as an explicit first parameter: `f := Rectangle.Area; f(r)`.
+- **Value receiver**: use for small, read-only methods (`Area()`, `String()`)
+- **Pointer receiver**: required for methods that mutate, or for large structs
 
 ```go
 r := Rectangle{Width: 3, Height: 4}
-getArea := r.Area        // method value — r is "baked in"
-fmt.Println(getArea())   // 12
 
-areaOf := Rectangle.Area  // method expression — r becomes a parameter
-fmt.Println(areaOf(r))    // 12
+// Method value — receiver is baked in
+getArea := r.Area
+fmt.Println(getArea()) // 12
+
+// Method expression — receiver becomes a parameter
+areaOf := Rectangle.Area
+fmt.Println(areaOf(r)) // 12
 ```
 
 ---
 
-## 15. The Functional Options Pattern
+## 17. The Functional Options Pattern
 
-A widely-used idiom that combines **variadic parameters + closures + function types** to handle optional configuration cleanly — Go has no function overloading or default parameter values, so this is the idiomatic substitute.
+Go has no function overloading or default parameter values. This pattern is the idiomatic substitute:
 
 ```go
 type Server struct {
@@ -966,7 +1318,7 @@ func WithTimeout(d time.Duration) Option {
 func NewServer(host string, opts ...Option) *Server {
     s := &Server{
         host:    host,
-        port:    8080,           // sensible defaults
+        port:    8080,
         timeout: 30 * time.Second,
     }
     for _, opt := range opts {
@@ -975,21 +1327,23 @@ func NewServer(host string, opts ...Option) *Server {
     return s
 }
 
-// Usage:
-s1 := NewServer("localhost")                                  // all defaults
+// Usage
+s1 := NewServer("localhost")
 s2 := NewServer("localhost", WithPort(9090), WithTimeout(5*time.Second))
 ```
 
-This avoids "telescoping constructors" (`NewServer(host, port, timeout, retries, tls, ...)`) and lets callers specify only what they care about, in any order.
+Each `With*` function is a closure that captures its argument and modifies the server when called. Callers specify only what they care about, in any order.
 
 ---
 
-## 16. No Function Overloading, No Default Arguments
+## 18. No Function Overloading, No Default Arguments
 
-Two things Go _deliberately_ does not support, which surprises newcomers from Python/Java/C++:
+Go deliberately does not support:
 
-- **No overloading**: you cannot declare two functions with the same name and different parameter types/counts in the same scope. Workarounds: different function names (`ParseInt`, `ParseFloat`), variadic parameters, `interface{}`/generics, or the functional options pattern above.
-- **No default parameter values**: `func greet(name string, greeting string = "Hello")` is **not valid Go**. Workarounds: variadic "options" structs, functional options, or simply requiring all arguments and providing a second convenience function:
+- **Overloading**: two functions with the same name and different parameters — use different names instead (`ParseInt`, `ParseFloat`)
+- **Default values**: `func greet(name string, greeting string = "Hello")` is invalid
+
+Workaround for defaults:
 
 ```go
 func GreetWithMessage(name, greeting string) string {
@@ -1003,88 +1357,82 @@ func Greet(name string) string {
 
 ---
 
-## 17. Order of Evaluation
+## 19. Order of Evaluation
 
-The Go spec **guarantees** that function calls, method calls, and channel operations appearing as operands of an expression are evaluated in **strict left-to-right lexical order**.
+Go guarantees function arguments are evaluated **left to right**:
 
 ```go
 func a() int { fmt.Println("a"); return 1 }
 func b() int { fmt.Println("b"); return 2 }
 
 sum := a() + b()
-// Always prints "a" then "b", regardless of compiler/platform
-```
-
-This matters when arguments have side effects:
-
-```go
-process(getNext(), getNext(), getNext()) // calls happen in order, left to right
+// Always prints "a" then "b"
 ```
 
 ---
 
-## 18. Common Pitfalls — Quick Reference Table
+## 20. Common Pitfalls — Quick Reference Table
 
 |Pitfall|What happens|Fix|
 |---|---|---|
-|Expecting `append` inside a function to mutate caller's slice|Caller's slice header unchanged — length/data may not update|Return the new slice and reassign: `s = grow(s)`|
-|Passing large structs/arrays by value in hot code|Full copy on every call — performance cost|Pass `*T` (pointer) instead|
-|`defer fn(x)` expecting `x`'s _future_ value|Arguments evaluated immediately at `defer` time|Use `defer func(){ ...x... }()` to read `x` later|
-|`defer resource.Close()` in a loop|All resources held until function returns, not per-iteration|Extract loop body into its own function|
-|Closures over loop variables (Go < 1.22, or `go.mod` < 1.22)|All closures share one variable → see final value|Shadow: `i := i` inside the loop, or pass as a goroutine arg|
-|Calling `recover()` outside a deferred function|Returns `nil`, does nothing — panic continues propagating|`recover()` must be called _directly_ inside `defer func(){...}()`|
-|Calling a `nil` function value|Runtime panic: nil pointer dereference|Check `if f != nil` before calling, or always assign a default|
-|`os.Exit()` in `main`|Skips all `defer` calls everywhere|Avoid `os.Exit` except as the very last thing, or restructure to return errors up to `main`|
-|Comparing two functions with `==`|Compile error (funcs only comparable to `nil`)|Compare via wrapping in structs with comparable IDs, or avoid the comparison|
-|Naked `return` in a long function|Returns named values, but unreadable at a glance|Use explicit `return x, y` except in trivial functions|
+|`append` inside a function|Caller's slice header unchanged|Return new slice, reassign: `s = grow(s)`|
+|Large structs by value in hot code|Full copy on every call|Pass `*T` instead|
+|`defer fn(x)` expecting future value of x|x captured immediately|Use `defer func(){ ...x... }()`|
+|`defer` inside a loop|All resources held until function returns|Extract loop body into its own function|
+|Closures over loop variables (Go < 1.22)|All closures see final value|Shadow: `i := i` inside loop|
+|`recover()` outside deferred function|Returns nil, does nothing|Must be inside `defer func(){ }()`|
+|Calling a nil function value|Runtime panic|Check `if f != nil` before calling|
+|`os.Exit()` in main|Skips all defers|Avoid except as very last thing|
+|Comparing two functions with `==`|Compile error|Functions only comparable to nil|
+|Naked return in long function|Returns named values, unreadable|Use explicit `return x, y`|
 
 ---
 
-## 19. Performance Notes
+## 21. Performance Notes
 
-### 19.1 Inlining
+### Inlining
 
-The Go compiler automatically **inlines** small, simple functions (no loops, limited complexity) directly at the call site, eliminating call overhead entirely. You can inspect inlining decisions with:
+The Go compiler inlines small, simple functions automatically. Inspect with:
 
 ```bash
 go build -gcflags="-m" ./...
 ```
 
-Functions with `defer`, closures capturing variables, recursion, or complex control flow are less likely to be inlined.
+Functions with `defer`, closures capturing variables, or complex control flow are less likely to be inlined.
 
-### 19.2 Pointers vs. values — the tradeoff
+### Pointers vs values
 
-- Passing a **large struct by value** copies all its bytes on every call — costly for big structs, cheap for small ones (a couple of `int64`s is often _faster_ by value than via pointer indirection).
-- Passing a **pointer** avoids the copy, but if the compiler's escape analysis determines the pointer "escapes" (e.g., stored somewhere that outlives the function, or the function is not inlined and the pointer must remain valid), the value gets allocated on the **heap** instead of the stack — heap allocations add GC pressure.
+- Large struct by value → copies all bytes every call
+- Pointer → avoids copy, but may escape to heap (GC pressure)
 
 ```bash
 go build -gcflags="-m" file.go   # shows "escapes to heap" diagnostics
 ```
 
-> [!tip] Rule of thumb For small structs (a few fields, all primitives), pass by value. For large structs, or when the function needs to mutate the original, pass by pointer. Don't micro-optimize this without profiling — readability and correctness come first; Go's compiler is quite good at making the "natural" choice fast.
+> [!tip] For small structs (a few primitive fields), pass by value. For large structs or mutation, pass by pointer. Don't micro-optimize without profiling.
 
-### 19.3 `defer` cost
+### defer cost
 
-As noted in §8.5, modern Go (1.14+) "open-codes" simple, non-loop `defer` statements, making them essentially free. `defer` inside a loop, or with more than ~8 deferred calls in one function, falls back to the slower heap-allocated path.
-
----
-
-## 20. Best Practices Checklist
-
-- **Keep functions small and single-purpose** — if you struggle to name it concisely, it's probably doing too much.
-- **Error as the last return value**, named `err` by convention.
-- **Use named returns sparingly** — mainly when combined with `defer`/`recover`, or when it meaningfully documents intent for short functions.
-- **Avoid naked returns** in anything longer than ~10 lines.
-- **Prefer pointer receivers for methods that mutate**, value receivers for small read-only methods — and be consistent within a type.
-- **Don't defer inside loops** — extract a helper function instead.
-- **Use the functional options pattern** instead of long parameter lists or boolean "flag" parameters.
-- **Reserve `panic` for programmer errors**; return `error` for anything a caller might reasonably need to handle.
-- **Be explicit about loop-variable capture** in goroutines/closures even on Go 1.22+ — pass values as arguments for clarity.
-- **Check `go.mod`'s `go` directive version** when debugging "weird" closure behavior in older codebases — it changes loop semantics.
+Go 1.14+ "open-codes" simple, non-loop `defer` statements — essentially free in common cases. `defer` inside a loop falls back to the slower heap-allocated path.
 
 ---
 
-## 21. Cheat Sheet — Syntax at a Glance
+## 22. Best Practices Checklist
+
+- Keep functions small and single-purpose
+- Error as the last return value, named `err` by convention
+- Use named returns sparingly — mainly with `defer`/`recover`
+- Avoid naked returns in anything longer than ~10 lines
+- Prefer pointer receivers for methods that mutate, value receivers for small read-only methods
+- Don't defer inside loops — extract a helper function instead
+- Use the functional options pattern instead of long parameter lists
+- Reserve `panic` for programmer errors; return `error` for anything a caller might handle
+- Be explicit about loop-variable capture in goroutines/closures even on Go 1.22+
+- Check `go.mod`'s `go` directive version when debugging closure behavior in older codebases
+
+---
+
+## 23. Cheat Sheet — Syntax at a Glance
 
 ```go
 // Basic
@@ -1098,7 +1446,7 @@ func name() (a T1, b T2) { a = v1; b = v2; return }
 
 // Variadic
 func name(args ...T) { ... }
-name(slice...) // spread
+name(slice...)              // spread
 
 // Function type
 type Fn func(T1, T2) T3
@@ -1108,17 +1456,42 @@ f := func(x T) T { return x }
 
 // Generic function
 func Name[T Constraint](x T) T { ... }
+func Name[T any](x T) T { ... }                  // no constraint
+func Name[T comparable](x T) bool { ... }        // == and !=
+func Name[T cmp.Ordered](a, b T) T { ... }       // <, <=, >, >=
+type Number interface { int | float64 }          // union constraint
+type Number interface { ~int | ~float64 }        // underlying-type constraint
+func Name[T, U any](x T) U { ... }               // multiple type params
+func Name[S ~[]E, E any](s S) E { ... }          // linked container constraint
 
 // Method (value vs pointer receiver)
 func (r Type) Method() { ... }
 func (r *Type) Method() { ... }
 
 // Method value / expression
-mv := instance.Method      // bound to instance
-me := Type.Method           // receiver becomes first arg
+mv := instance.Method        // bound to instance
+me := Type.Method            // receiver becomes first arg
+
+// Handler
+func handler(w http.ResponseWriter, r *http.Request) { ... }
+http.HandleFunc("/path", handler)
+
+// Middleware
+func withSomething(next http.HandlerFunc) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // before
+        next(w, r)   // call the wrapped handler
+        // after
+    }
+}
+http.HandleFunc("/path", withLogging(withAuth(handler)))
 
 // Defer / panic / recover
 defer cleanup()
 defer func() { recover() }()
 panic("message")
 ```
+
+---
+
+_Previous: [[Go - Control Flow]] · Next: [[Go - Structs and Methods]]_
