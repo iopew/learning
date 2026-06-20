@@ -1494,4 +1494,4 @@ panic("message")
 
 ---
 
-_Previous: [[Go - Control Flow]] · Next: [[Go - Structs and Methods]]_
+_Previous: [[Go - Control Flow]] · Next: [[Arrays & Slices]]_
