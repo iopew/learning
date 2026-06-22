@@ -821,4 +821,4 @@ json.Unmarshal(data, &map[string]any{})  // numbers decode as float64!
 
 ---
 
-_Previous: [[Go - Arrays and Slices]] · Next: [[Go - Strings and Runes]]_
+_Previous: [[Go - Arrays and Slices]] · Next: [[Strings and Runes]]_
