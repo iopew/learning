@@ -180,16 +180,20 @@ Go/
 │     (ignoring errors, over-wrapping, losing context)
 │
 ├── 12 - Goroutines.md
-│     What a goroutine is (lightweight thread), go keyword,
-│     goroutines vs OS threads, goroutine scheduling (M:N
-│     scheduler, GOMAXPROCS), goroutine lifecycle, main
-│     goroutine exits = all goroutines exit, goroutine
-│     leaks (how they happen, how to prevent), sync.WaitGroup
-│     (Add, Done, Wait), goroutine patterns (fire and forget,
-│     worker pool, fan-out), goroutine stack (starts small,
-│     grows dynamically), goroutines and closures (the loop
-│     capture bug), data races (what they are, how to detect
-│     with -race flag), goroutines are not coroutines
+|	│What a goroutine is (lightweight thread), go keyword,
+|	goroutines vs OS threads, goroutine scheduling (M:N
+|	scheduler, GOMAXPROCS), goroutine lifecycle, main
+|	goroutine exits = all goroutines exit, sync.WaitGroup
+|	(Add, Done, Wait), goroutine stack (starts small,
+|	grows dynamically), goroutines and closures (the loop
+|	capture bug), DATA RACES (what they are, how to detect
+|	with -race flag), SYNC.MUTEX (Lock, Unlock, protecting
+|	shared resources, defer Unlock, NEVER copy a Mutex,
+|	RWMutex for read-heavy workloads), applying Mutex to
+|	maps and other shared data, goroutine leaks (how they
+|	happen, how to prevent), goroutine patterns (fire and
+|	forget, worker pool, fan-out), goroutines are not
+|	coroutines
 │
 ├── 13 - Channels.md
 │     What a channel is (typed pipe), make(chan T),

@@ -738,7 +738,7 @@ m := map[string]int{}
 // DANGEROUS — multiple goroutines writing concurrently
 for i := 0; i < 10; i++ {
     go func(n int) {
-        m[fmt.Sprintf("key%d", n)] = n   // fatal error: concurrent map writes
+	        m[fmt.Sprintf("key%d", n)] = n   // fatal error: concurrent map writes
     }(i)
 }
 ```
@@ -913,7 +913,7 @@ func containsSet(set map[string]struct{}, target string) bool {
 
 If you're checking membership against the same collection many times, convert it to a set/map once, rather than linearly scanning a slice on every check.
 
-### Struct keys vs pointer keys
+### ==Struct keys vs pointer keys==
 
 ```go
 type Point struct{ X, Y int }
@@ -931,7 +931,7 @@ m2[p1] = "a"
 fmt.Println(m2[p2])   // "" — NOT found! different pointer, different key
 ```
 
-This distinction matters — choose struct keys when you want "same data = same key," and pointer keys only when you specifically want "same instance = same key."
+==This distinction matters — choose struct keys when you want "same data = same key," and pointer keys only when you specifically want "same instance = same key."==
 
 ---
 
