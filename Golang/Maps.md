@@ -540,6 +540,192 @@ func intersection(a, b map[string]struct{}) map[string]struct{} {
 }
 ```
 
+A set is a collection where each item appears **at most once** — no duplicates. It answers one question efficiently: **"is this item in the collection?"**
+
+Go has no built-in set type. The idiomatic substitute is a map where you only care about the keys, not the values.
+
+---
+
+### Why map[T]struct{} and not map[T]bool
+
+You could use either, but `struct{}` is the standard:
+
+go
+
+```go
+// With bool — works, but has problems
+set := map[string]bool{}
+set["apple"] = true
+set["banana"] = false   // what does this mean? is banana "in" the set or not?
+
+if set["apple"] { }    // true — apple is in the set
+if set["banana"] { }   // false — but is banana absent, or just false?
+```
+
+The `bool` version creates ambiguity — a key set to `false` looks the same as a missing key when you check it. This defeats the purpose.
+
+go
+
+```go
+// With struct{} — unambiguous
+set := map[string]struct{}{}
+set["apple"] = struct{}{}
+
+_, ok := set["apple"]   // ok=true means present, ok=false means absent
+                         // there is no "false" state — presence IS membership
+```
+
+Also, `struct{}` takes **zero bytes** of memory for its values — it's the empty struct. Using it signals clearly: "I only care about the keys."
+
+---
+
+### The four operations
+
+go
+
+```go
+set := map[string]struct{}{}
+
+// Add
+set["apple"] = struct{}{}
+
+// Check membership
+_, ok := set["apple"]
+if ok {
+    fmt.Println("apple is in the set")
+}
+
+// Remove
+delete(set, "apple")
+
+// Size
+fmt.Println(len(set))
+```
+
+---
+
+### When to use a set
+
+#### 1. Deduplication — removing duplicates from a slice
+
+go
+
+```go
+words := []string{"go", "is", "fun", "go", "is", "go"}
+
+seen := map[string]struct{}{}
+var unique []string
+for _, w := range words {
+    if _, ok := seen[w]; !ok {
+        seen[w] = struct{}{}
+        unique = append(unique, w)
+    }
+}
+fmt.Println(unique)   // [go is fun]
+```
+
+#### 2. Fast membership checking — "have I seen this before?"
+
+go
+
+```go
+// Check if a username is already taken — O(1) lookup
+taken := map[string]struct{}{
+    "alice": {},
+    "bob":   {},
+    "carol": {},
+}
+
+username := "alice"
+if _, ok := taken[username]; ok {
+    fmt.Println("username taken")
+}
+```
+
+Without a set, you'd have to linearly scan a slice every time — O(n). With a set, every check is O(1) regardless of how large the collection grows.
+
+#### 3. Tracking visited items — graph traversal, cycle detection
+
+go
+
+```go
+visited := map[string]struct{}{}
+
+func dfs(node string) {
+    if _, ok := visited[node]; ok {
+        return   // already visited — stop
+    }
+    visited[node] = struct{}{}
+
+    for _, neighbor := range graph[node] {
+        dfs(neighbor)
+    }
+}
+```
+
+#### 4. Filtering — keeping only items that appear in a reference collection
+
+go
+
+```go
+allowed := map[string]struct{}{
+    "GET":    {},
+    "POST":   {},
+    "DELETE": {},
+}
+
+methods := []string{"GET", "PATCH", "POST", "PUT", "DELETE"}
+
+var valid []string
+for _, m := range methods {
+    if _, ok := allowed[m]; ok {
+        valid = append(valid, m)
+    }
+}
+fmt.Println(valid)   // [GET POST DELETE]
+```
+
+---
+
+### Set operations
+
+go
+
+```go
+func union(a, b map[string]struct{}) map[string]struct{} {
+    result := make(map[string]struct{})
+    for k := range a { result[k] = struct{}{} }
+    for k := range b { result[k] = struct{}{} }
+    return result
+}
+
+func intersection(a, b map[string]struct{}) map[string]struct{} {
+    result := make(map[string]struct{})
+    for k := range a {
+        if _, ok := b[k]; ok {
+            result[k] = struct{}{}
+        }
+    }
+    return result
+}
+
+func difference(a, b map[string]struct{}) map[string]struct{} {
+    result := make(map[string]struct{})
+    for k := range a {
+        if _, ok := b[k]; !ok {
+            result[k] = struct{}{}   // in a but NOT in b
+        }
+    }
+    return result
+}
+```
+
+---
+
+### The short version
+
+A set is just a map where the value type carries no information — `struct{}` is used because it's the smallest possible value (zero bytes). The keys ARE the set. Presence in the map means "in the set," absence means "not in the set." Use it whenever you need to track uniqueness or test membership efficiently.
+
 ---
 
 ## 13. Maps and Concurrency
