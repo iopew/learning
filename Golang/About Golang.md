@@ -381,3 +381,185 @@ I’d like to learn about Functions in Go comprehensively with detailed examples
 
 Make questions for anki until the the end of 12th section (generic functions). Avoid Yes\No questions. Make them contemplative and complex. Include coding. Make a lot of questions, do not limit yourself to a few questions for the section, make a lot of them, so that YOU COVER EVERYTHING, do not miss anything. I expect a MINIMUM of 50 questions
 
+---
+---
+---
+
+
+Here's a complete summary you can paste at the start of any new chat:
+
+---
+
+## Context for Claude
+
+I am learning **Go (Golang)** from scratch, building a comprehensive Obsidian note vault as I go. Here is everything you need to know to continue helping me effectively.
+
+---
+
+### My Setup
+
+- **Editor:** Obsidian (notes use wikilinks `[[#Section]]`, callout blocks `> [!warning]`, `> [!tip]`, `> [!info]`)
+- **Platform:** Mac
+- **Location:** Tashkent, Uzbekistan
+- **Learning tools:** Anki (flashcards with spaced repetition), YouTube videos
+- **Go knowledge level:** Beginner, progressing through topics systematically
+
+---
+
+### Note Style & Preferences
+
+Every Obsidian note follows this structure:
+
+- Frontmatter with tags and series info
+- Full table of contents with `[[#Section]]` wikilinks
+- Obsidian callout blocks (`> [!warning]`, `> [!tip]`, `> [!info]`)
+- Code blocks with `go` syntax highlighting
+- Series navigation links at the bottom (`Previous: [[...]] · Next: [[...]]`)
+- A Quick Reference Cheatsheet as the last section before the nav links
+
+---
+
+### Curriculum Structure
+
+The full Go learning path I am following:
+
+```
+Go/
+├── 00 - Overview.md
+├── 01 - Variables & Types.md          ✅ DONE
+├── 02 - Operators.md                  ✅ DONE
+├── 03 - Control Flow.md               ✅ DONE
+├── 04 - Functions.md                  ✅ DONE
+├── 05 - Arrays & Slices.md            ✅ DONE
+├── 06 - Maps.md                       ✅ DONE
+├── 07 - Strings & Runes.md            ✅ DONE
+├── 08 - Pointers.md                   ← NEXT
+├── 09 - Structs & Methods.md
+├── 10 - Interfaces.md
+├── 11 - Error Handling.md
+├── 12 - Goroutines.md
+├── 13 - Channels.md
+├── 14 - Sync Primitives.md
+├── 15 - Generics.md
+├── 16 - Packages & Modules.md
+├── 17 - Standard Library.md
+├── 18 - net/http.md
+├── 19 - encoding/json.md
+├── 20 - File I/O.md
+├── 21 - Testing.md
+├── 22 - CLI Tools.md
+├── 23 - Context.md
+├── 24 - Reflection.md
+└── 25 - Patterns & Idioms.md
+```
+
+---
+
+### What Each Note Should Cover
+
+When I say "let's explore topic X", create a **full, detailed Obsidian note** covering everything listed below for that topic.
+
+**08 - Pointers.md** What a pointer is, `&` and `*` operators, `*T` type syntax, nil pointers and panics, `new(T)`, pointer to struct (automatic dereferencing), pass by pointer vs value (when to use each), pointers and interfaces, double pointers (`**T`), pointer receivers vs value receivers, common patterns (optional values via nil, mutation in functions, avoiding large copies), what Go does NOT have (pointer arithmetic, manual memory management), escape analysis (stack vs heap), `unsafe.Pointer` (brief mention — when it exists and why to avoid it)
+
+**09 - Structs & Methods.md** struct syntax, field access, struct literals (named vs positional), anonymous structs, zero value structs, struct embedding (composition over inheritance), promoted fields and methods, struct tags (json, db, validate), comparing structs (`==` only for comparable fields), copying structs, methods (value vs pointer receivers, consistency rule), method sets, method values vs method expressions, constructor functions (`New*` pattern), the Stringer interface (`String() string`), embedding interfaces in structs, struct design patterns (functional options recap, builder pattern)
+
+**10 - Interfaces.md** What an interface is (a contract, not inheritance), implicit satisfaction (no implements keyword), defining interfaces, small interfaces (`io.Reader`, `io.Writer`, `fmt.Stringer`), interface values (type + value pair), nil interfaces vs nil concrete values (the nil interface trap), empty interface (`any` / `interface{}`), type assertions (single and two-value form), type switches, interface composition, interfaces and polymorphism, common standard library interfaces (`io.Reader`, `io.Writer`, `io.Closer`, `io.ReadWriter`, `fmt.Stringer`, `error`, `sort.Interface`), when NOT to use interfaces, interface satisfaction check pattern (`var _ Interface = (*Type)(nil)`), errors as interfaces
+
+**11 - Error Handling.md** `error` as an interface (`Error() string`), nil means no error, `errors.New()`, `fmt.Errorf()`, error wrapping (`%w` verb), `errors.Is()`, `errors.As()`, custom error types, sentinel errors (`io.EOF`, `sql.ErrNoRows`), error handling patterns (early return, guard clauses, wrapping with context), panic vs error, `log.Fatal` vs panic vs return error, multiple error strategies, error handling in goroutines, common mistakes (ignoring errors, over-wrapping, losing context)
+
+**12 - Goroutines.md** What a goroutine is, `go` keyword, goroutines vs OS threads, goroutine scheduling (M:N scheduler, GOMAXPROCS), goroutine lifecycle, main goroutine exits = all goroutines exit, goroutine leaks, `sync.WaitGroup`, goroutine patterns (fire and forget, worker pool, fan-out), goroutine stack (starts small, grows dynamically), goroutines and closures (loop capture bug), data races (`-race` flag)
+
+**13 - Channels.md** What a channel is, `make(chan T)`, unbuffered vs buffered channels, send and receive, closing a channel, receiving from closed channel, `range` over channel, channel direction (`chan<- T`, `<-chan T`), `select` statement deep dive, channel patterns (done channel, pipeline, fan-out, fan-in, semaphore, timeout), deadlocks, nil channel behavior, channel vs mutex, channel ownership
+
+**14 - Sync Primitives.md** `sync.Mutex`, `sync.RWMutex`, `sync.WaitGroup`, `sync.Once`, `sync.Map`, atomic operations (`sync/atomic`), race detector, common concurrency mistakes
+
+**15 - Generics.md** Full deep dive beyond what's in Functions note: generic types (structs + methods), generic interfaces, constraints package, real-world generic utilities (Map, Filter, Reduce, Contains, Keys, Values), when to use generics vs interfaces vs any, performance, limitations
+
+**16 - Packages & Modules.md** Package basics, import paths, visibility, `init()` order across packages, `go.mod`, `go.sum`, `go get`, `go mod tidy`, `go mod vendor`, semantic versioning, internal packages, blank imports, dot imports, package naming conventions, organizing code, build constraints, workspaces
+
+**17 - Standard Library.md** `fmt` (all verbs), `os`, `io`, `bufio`, `strings` (full reference), `strconv`, `math`, `sort`, `time`, `log`
+
+**18 - net/http.md** HTTP server, ServeMux, handlers, request/response, middleware, routing, HTTP client, JSON APIs, cookies, TLS, timeouts, context cancellation, testing HTTP handlers
+
+**19 - encoding/json.md** `json.Marshal`, `json.Unmarshal`, struct tags, `json.Encoder`/`Decoder`, `map[string]any`, `json.RawMessage`, custom marshaling, null vs missing fields, `json.Number`, common mistakes
+
+**20 - File I/O.md** `os.Open`, `os.Create`, `os.OpenFile`, reading/writing patterns, `defer f.Close()`, `filepath` package, directory traversal, temp files, `embed` package
+
+**21 - Testing.md** `testing` package, table-driven tests, subtests, benchmarks, examples, test helpers, coverage, mocking, `httptest`, fuzzing, best practices
+
+**22 - CLI Tools.md** `os.Args`, `flag` package, subcommands, environment variables, reading stdin, exit codes, cobra library, building and distributing
+
+**23 - Context.md** What context is, `context.Background()`, `context.TODO()`, `WithCancel`, `WithTimeout`, `WithDeadline`, `WithValue`, passing context as first parameter, `ctx.Err()`, context in HTTP handlers, common mistakes
+
+**24 - Reflection.md** `reflect` package, Kind vs Type, struct fields and tags, modifying values, calling methods, `reflect.DeepEqual`, creating values dynamically, when to use reflection, performance cost, alternatives
+
+**25 - Patterns & Idioms.md** Worker pool, pipeline, fan-out/fan-in, done channel, semaphore, functional options, builder, singleton, options struct, table-driven design, error wrapping conventions, `io.Reader`/`io.Writer` composition, interface segregation, dependency injection, embed, go:generate
+
+---
+
+### Anki Card Style
+
+When making Anki questions:
+
+- **No yes/no questions** — all questions must be contemplative and complex
+- **Include coding questions** — predict output, spot the bug, write the fix
+- **Cover everything** — aim for minimum 25-30 cards per topic, do not miss sections
+- **Format:**
+    
+    ```
+    Q: [question]A: [answer with code if needed]
+    ```
+    
+
+---
+
+### Teaching Style Preferences
+
+- Explain things **from scratch with examples** when I say I don't understand
+- When I ask "explain this" with a screenshot or code snippet — break it down step by step, simply
+- When I ask for **more examples** — give different scenarios, not variations of the same one
+- Keep explanations **focused** — no unnecessary padding
+- When I paste a document and ask to **update it** — only change what was asked, leave everything else untouched
+- When I say **"make questions for Anki"** with a pasted document — cover every section, minimum 25 cards
+- When I say **"lets explore [topic]"** — create the full Obsidian note outputting it as a downloadable `.md` file
+
+---
+
+### Conversation Patterns Established
+
+- I paste my Obsidian note → ask for Anki cards → you cover every section
+- I paste a screenshot of code from my notes → ask "explain this" → you break it down simply
+- I ask "what is X" mid-topic → you explain it clearly with examples, then offer to connect it back to the current topic
+- I say "update the document" → you only change what was requested
+- I say "add more detail to section X" → you update just that section, leave others untouched
+- When I don't understand something → I tell you directly, you start fresh with a simpler explanation
+- Notes that are already done do NOT need to be recreated — just reference them
+
+---
+
+### Topics Already Deeply Discussed (Beyond the Notes)
+
+These came up during conversation and were explained in detail — no need to re-explain unless asked:
+
+- Why `defer` captures arguments immediately vs closures seeing current values
+- Named return values + defer interaction (the "magic" step order)
+- Why `f.Close()` can fail and why the named return pattern catches it
+- The full `panic` unwind process with the a→b→c stack example
+- `log.Fatal` vs `panic` (output, defers, exit codes, when to use each)
+- What handlers, parsers, and middleware are (non-Go general concepts)
+- How middleware chains work — `next(w, r)` handoff explained in detail
+- Why `recover()` only works inside `defer`
+- Closures — what they are, why captured variables survive, shared state
+- Why `any` and `interface{}` both exist (backwards compatibility)
+- Type assertions — only work on interfaces, why concrete types can't be asserted
+- Interfaces — what they are, implicit satisfaction, will be covered in depth in note 10
+- `init()` — FIFO not LIFO, blank imports, why to avoid writing your own
+- Recursion — base case + recursive case, when to use vs loops, stack growth
+- Functional options — what they are, the coffee example, when you need them
+- The set pattern — `map[T]struct{}` vs `map[T]bool`, the four operations, use cases
+- Struct keys vs pointer keys in maps — value equality vs address identity
+- Why map iteration order is actively randomized (not just unspecified)
+
+---
+
+Paste this at the top of any new conversation and Claude will have full context to continue exactly where we left off.
