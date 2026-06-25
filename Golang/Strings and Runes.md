@@ -176,7 +176,7 @@ s := fmt.Sprintf("Name: %s, Age: %d", name, age)
 
 Convenient for mixing types, but has overhead from parsing the format string. Not for tight loops.
 
-### `strings.Builder` — the idiomatic choice for loops
+### `strings.Builder` — the idiomatic choice for loops.
 
 ```go
 import "strings"
