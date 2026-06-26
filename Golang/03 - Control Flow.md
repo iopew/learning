@@ -1485,4 +1485,4 @@ defer func() {
 
 ---
 
-_Previous: [[Go - Operators]] · Next: [[Functions]]_
+_Previous: [[Go - Operators]] · Next: [[04 - Functions]]_

@@ -887,4 +887,4 @@ slices.Contains(s, target)      // linear search, Go 1.21+
 
 ---
 
-_Previous: [[Go - Functions]] · Next: [[Maps]]_
+_Previous: [[Go - Functions]] · Next: [[06 - Maps]]_

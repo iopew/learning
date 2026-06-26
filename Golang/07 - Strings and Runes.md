@@ -488,7 +488,6 @@ strings.NewReplacer("a", "x", "b", "y").Replace("abc")  // "xyc" — multi-repla
 ### The Replacer — efficient multi-replacement
 
 `strings.NewReplacer` is far more efficient than calling `strings.Replace` multiple times, as it makes a single pass through the string:
-
 ```go
 r := strings.NewReplacer(
     "<", "&lt;",
@@ -921,4 +920,4 @@ unicode.ToLower(r)
 
 ---
 
-_Previous: [[Go - Maps]] · Next: [[Go - Pointers]]_
+_Previous: [[Go - Maps]] · Next: [[08 - Pointers]]_

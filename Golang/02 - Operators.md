@@ -544,4 +544,4 @@ result := sb.String()
 
 ---
 
-_Previous: [[Go - Variables and Types]] · Next: [[Control Flow]]_
+_Previous: [[Go - Variables and Types]] · Next: [[03 - Control Flow]]_

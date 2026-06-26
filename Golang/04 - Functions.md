@@ -1494,4 +1494,4 @@ panic("message")
 
 ---
 
-_Previous: [[Go - Control Flow]] · Next: [[Arrays & Slices]]_
+_Previous: [[Go - Control Flow]] · Next: [[05 - Arrays & Slices]]_

@@ -743,4 +743,4 @@ strconv.Atoi(s)      // decimal string → int, error
 
 ---
 
-_Next topic: → [[Operators]]_
+_Next topic: → [[02 - Operators]]_
