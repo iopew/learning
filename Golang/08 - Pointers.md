@@ -18,7 +18,7 @@
 
 ---
 
-## What is a Pointer?/
+## What is a Pointer?
 
 A pointer is a variable that stores the **memory address** of another variable — not the value itself, but _where_ the value lives in memory.
 
