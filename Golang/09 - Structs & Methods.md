@@ -195,7 +195,7 @@ cfg.Settings["debug"] = "true" // panic: assignment to entry in nil map
 
 ## Struct Embedding — Composition Over Inheritance
 
-Go has no class inheritance. Instead, structs achieve code reuse through **embedding** — placing one struct inside another without a field name.
+	Go has no class inheritance. Instead, structs achieve code reuse through **embedding** — placing one struct inside another without a field name.
 
 ```go
 type Animal struct {
