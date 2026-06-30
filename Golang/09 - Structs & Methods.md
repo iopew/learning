@@ -195,7 +195,7 @@ cfg.Settings["debug"] = "true" // panic: assignment to entry in nil map
 
 ## Struct Embedding — Composition Over Inheritance
 
-	Go has no class inheritance. Instead, structs achieve code reuse through **embedding** — placing one struct inside another without a field name.
+Go has no class inheritance. Instead, structs achieve code reuse through **embedding** — placing one struct inside another without a field name.
 
 ```go
 type Animal struct {
@@ -478,6 +478,39 @@ ic = &c            // ✅ *Counter's method set includes both Value and Inc
 
 > [!info] When calling a method directly on an addressable variable (like a local variable `c`), Go automatically takes its address for you if needed. This auto-addressing does NOT happen for interface satisfaction — that's checked strictly by method set rules, which is why `Counter` (not `*Counter`) fails to satisfy an interface requiring `Inc()`.
 
+### Why *T's method set is bigger than T's
+
+It can feel backwards at first — shouldn't the plain value have access to everything? It doesn't, and here's the reasoning:
+
+A pointer (`*T`) holds an **address**. From an address you can always reach the underlying value — just dereference it (`*p`). So a pointer can do everything a value can, _plus_ it can mutate through that address.
+
+A value (`T`) just holds **data**. It has no address information — it cannot produce a pointer to itself out of nowhere.
+
+```
+*T can derive T   (dereference: *p)
+T cannot derive *T   (no address to give)
+```
+
+Since `*T` can always get to the underlying value, it can call **value receiver methods** (which only need the data) — and it can obviously call **pointer receiver methods** too (it already has the address). So `*T`'s method set includes both.
+
+`T` only has the data, no address — so it can only call **value receiver methods**.
+
+```go
+type Counter struct{ count int }
+func (c Counter) Value() int { return c.count }  // value receiver
+func (c *Counter) Inc()      { c.count++ }        // pointer receiver
+
+var c Counter
+c.Inc() // Go secretly rewrites this as (&c).Inc() — works here because
+        // c is an addressable local variable in a direct call
+
+var i interface{ Inc() } = c // ❌ fails — Counter's method set does NOT include Inc()
+```
+
+This is the key distinction: the auto-addressing trick (`(&c).Inc()`) only applies to **direct calls on addressable variables**. It does NOT apply to **interface satisfaction**, which is checked strictly against the declared method set at compile time. `Counter` was never declared to have `Inc()` — only `*Counter` was.
+
+> [!tip] A simple way to remember it: a pointer is "value + address." A value is just "value." Since pointer ⊇ value in terms of what it carries, the pointer's capabilities are a superset of the value's. More information → more abilities, not less.
+
 ---
 
 ## Method Values vs Method Expressions
@@ -615,6 +648,47 @@ fmt.Println(StatusActive) // "Active" — instead of just printing 1
 ```
 
 > [!tip] Implementing `Stringer` is extremely common for enum-like types and any struct you'll frequently print or log — it makes debug output and logs human-readable instead of raw field dumps or magic numbers.
+
+### Why the exact name `String` matters
+
+`Stringer` isn't special because of language magic — `fmt`'s own source code does a type assertion against this exact interface:
+
+```go
+type Stringer interface {
+    String() string
+}
+```
+
+This checks for a method with the **exact name `String`** and the **exact signature `() string`**. If you rename the method to anything else — `Display()`, `Show()`, `Render()` — even with an identical signature, `fmt` will never find it. Method names are part of the interface contract in Go, not just the parameter/return types.
+
+```go
+type Money struct{ Cents int64 }
+
+// Renamed from String() to Display() — breaks automatic detection
+func (m Money) Display() string {
+	return fmt.Sprintf("$%d.%02d", m.Cents/100, m.Cents%100)
+}
+
+m := Money{Cents: 500}
+fmt.Println(m)           // {500} — fmt has no idea Display() exists
+fmt.Println(m.Display()) // $5.00 — only works if called explicitly, every time
+```
+
+With `String()` instead of `Display()`, `fmt.Println(m)` would automatically print `$5.00` — no manual call needed anywhere in the codebase.
+
+> [!info] `fmt` also checks for `Stringer` on **nested struct fields**, not just the top-level value. So implementing `String()` once on `Money` automatically makes it format correctly everywhere it's embedded — inside an `Order` struct, a slice, a log line — without extra work at each call site.
+
+```go
+type Order struct {
+	ID    string
+	Total Money
+}
+
+order := Order{ID: "ORD-1", Total: Money{Cents: 500}}
+fmt.Println(order) // {ORD-1 $5.00} — Stringer found recursively on the nested field
+```
+
+This is the same pattern used by other standard library interfaces — `error` (`Error() string`), `io.Reader` (`Read(...)`), `json.Marshaler` (`MarshalJSON() ([]byte, error)`). None are language keywords; each is a plain interface that specific standard library functions check for by exact method name and signature at runtime.
 
 ---
 
