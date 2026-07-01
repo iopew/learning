@@ -718,6 +718,46 @@ func (lr LoggingReader) Read(p []byte) (int, error) {
 
 > [!info] Embedding an interface lets a struct "promise" to implement that interface (satisfying the type system) while you only override the specific methods you care about — the rest come from whatever concrete value you assign to the embedded interface field at runtime.
 
+### What "satisfy" and "promise" actually mean here
+
+These aren't special Go keywords — they're plain-language ways to describe what's happening with the type system.
+
+**"Satisfy an interface"** simply means: a type has all the methods the interface requires.
+
+```go
+type Reader interface {
+    Read(p []byte) (n int, err error)
+}
+
+type File struct{}
+func (f File) Read(p []byte) (int, error) { return 0, nil }
+
+var r Reader = File{} // ✅ File has a matching Read() method, so it satisfies Reader
+```
+
+**Now with embedding:**
+
+```go
+type LoggingReader struct {
+    Reader // embedded interface — no Read() written by LoggingReader itself
+}
+
+var r Reader = LoggingReader{} // ✅ this still compiles!
+```
+
+`LoggingReader` never wrote its own `Read()`. But because it embeds `Reader`, Go automatically promotes a `Read()` method onto it — borrowed from whatever concrete value sits inside the embedded field. The compiler is satisfied purely because of the embedding, not because real, working code was written.
+
+This is the **"promise"**: the struct type-checks as a `Reader` on paper, but that promise is only backed by whatever real value is placed in the embedded field at runtime.
+
+```go
+var lr LoggingReader // embedded Reader field is nil — nothing to delegate to
+lr.Read(buf)          // 💥 panic — the promise was empty, nothing behind it
+```
+
+The compiler was happy (`LoggingReader` satisfies `Reader`), but at runtime there's no actual implementation behind the promoted method, because the embedded field was never assigned a real value.
+
+> [!tip] Analogy: a résumé listing "Skills: Driving" because you own a car qualifies you on paper (satisfies the requirement) — but if you've never actually driven and there's no gas in the tank, asking you to drive (calling the method) fails immediately. Satisfying an interface via embedding is the same — it passes the compiler's check, but only works at runtime if something real is actually behind it.
+
 ```go
 // Partial mock for testing — only override what you need
 type MockReader struct {
