@@ -936,18 +936,18 @@ NewRequestBuilder().Method("GET").URL(u).Header(k, v)
 
 ### Key Rules to Remember
 
-|Rule|Detail|
-|---|---|
-|Named literals|always prefer over positional for clarity and safety|
-|Zero value structs|ready to use, but nested maps/slices are nil|
-|Embedding|composition, not inheritance — fields/methods promoted|
-|Struct tags|inert metadata — only matter if a library reads them|
-|`==` comparison|only works if all fields are comparable|
-|Copying|shallow — slices/maps inside are shared, not deep-copied|
-|Receiver consistency|pick value or pointer receivers, don't mix|
-|Method set rule|`*T` gets both value and pointer methods, `T` gets only value methods|
-|Constructors|`New*` pattern — enforce defaults, validation, encapsulation|
-|Stringer|implement `String() string` for readable `fmt` output|
+| Rule                 | Detail                                                                |
+| -------------------- | --------------------------------------------------------------------- |
+| Named literals       | always prefer over positional for clarity and safety                  |
+| Zero value structs   | ready to use, but nested maps/slices are nil                          |
+| Embedding            | composition, not inheritance — fields/methods promoted                |
+| Struct tags          | inert metadata — only matter if a library reads them                  |
+| `==` comparison      | only works if all fields are comparable                               |
+| Copying              | shallow — slices/maps inside are shared, not deep-copied              |
+| Receiver consistency | pick value or pointer receivers, don't mix                            |
+| Method set rule      | `*T` gets both value and pointer methods, `T` gets only value methods |
+| Constructors         | `New*` pattern — enforce defaults, validation, encapsulation          |
+| Stringer             | implement `String() string` for readable `fmt` output                 |
 
 ---
 
