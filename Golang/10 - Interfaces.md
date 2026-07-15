@@ -49,6 +49,33 @@ sayHello(Person{Name: "Alice"}) // Hi, I'm Alice
 sayHello(Robot{ID: "R2"})       // BEEP BOOP, UNIT R2
 ```
 
+Same pattern with a `Speaker` interface — three completely unrelated types, one function:
+
+```go
+type Speaker interface {
+    Speak() string
+}
+
+type Dog struct{ Name string }
+func (d Dog) Speak() string { return d.Name + " says woof!" }
+
+type Cat struct{ Name string }
+func (c Cat) Speak() string { return c.Name + " says meow!" }
+
+type Clock struct{}
+func (c Clock) Speak() string { return "tick tock" }
+
+func PrintSound(s Speaker) {
+    fmt.Println(s.Speak())
+}
+
+PrintSound(Dog{Name: "Rex"})   // Rex says woof!
+PrintSound(Cat{Name: "Luna"})  // Luna says meow!
+PrintSound(Clock{})            // tick tock
+```
+
+The function `PrintSound` has no idea what concrete type it receives — it only knows that whatever comes in can `Speak()`. This is polymorphism in Go.
+
 ---
 
 ## Implicit Satisfaction — No implements Keyword
@@ -167,24 +194,54 @@ Small interfaces compose well — you'll see this in [[#Interface Composition]] 
 
 ## Interface Values — Type + Value Pair
 
-An interface value in Go is internally a **pair**: the concrete type stored, and the actual value.
+Think of an interface variable as a **post-it note with two lines**:
+
+```
+┌──────────────────────┐
+│ WHAT TYPE:           │
+│ THE VALUE:           │
+└──────────────────────┘
+```
+
+In Go, an interface value is internally a **pair**: the concrete type stored, and the actual value.
 
 ```go
-var s Shape // interface value: (type=nil, value=nil)
+var s Speaker
+// s = (type: nothing, value: nothing) — blank post-it
+```
 
-s = Circle{Radius: 5}
-// now: (type=Circle, value={Radius:5})
+When you assign something to the interface, Go fills in both lines:
 
-s = Rectangle{Width: 2, Height: 3}
-// now: (type=Rectangle, value={Width:2, Height:3})
+```go
+s = Dog{Name: "Rex"}
+// s = (type: Dog, value: {Rex})
+┌──────────────────────┐
+│ WHAT TYPE: Dog       │
+│ THE VALUE: {Rex}     │
+└──────────────────────┘
+```
+
+When you call `s.Speak()`, Go reads the post-it: "oh, it's a `Dog`" → finds `Dog`'s `Speak` method → calls it with `{Name: "Rex"}`. The interface tells Go **what type it is** and **where the value is**.
+
+You can change what the interface holds:
+
+```go
+s = Clock{}
+// s = (type: Clock, value: {})
+┌──────────────────────┐
+│ WHAT TYPE: Clock     │
+│ THE VALUE: {}        │
+└──────────────────────┘
 ```
 
 You can inspect this pair at runtime:
 
 ```go
-fmt.Printf("%T\n", s) // main.Rectangle — the dynamic TYPE
-fmt.Println(s)        // {2 3}         — the dynamic VALUE
+fmt.Printf("type=%T, value=%v\n", s, s)
+// type=main.Clock, value={}
 ```
+
+`%T` prints the concrete type stored in the interface. `%v` prints the concrete value using that type's own formatting.
 
 > [!info] This is why interfaces can hold _any_ type that satisfies them — the interface variable isn't a fixed-size box for a specific type, it's a two-word structure: a pointer to type information, and a pointer (or small value) for the actual data.
 
@@ -192,15 +249,43 @@ fmt.Println(s)        // {2 3}         — the dynamic VALUE
 
 ## Nil Interfaces vs Nil Concrete Values — The Nil Interface Trap
 
-This is one of the most infamous Go gotchas. An interface value is only truly `nil` when **both** its type and value are nil. A nil concrete value stored inside a non-nil interface type is **NOT** a nil interface.
+This is one of the most infamous Go gotchas. An interface is only truly `nil` when **both** lines of the post-it are blank.
+
+### The problem
+
+```go
+var s Speaker
+// s = (type: nothing, value: nothing) — BOTH lines blank
+// s == nil → true
+```
+
+Now watch what happens when you assign a typed nil:
+
+```go
+var d *Dog = nil  // d is a nil pointer to Dog
+s = d             
+// s = (type: *Dog, value: nil)
+┌──────────────────────┐
+│ WHAT TYPE: *Dog      │ ← something is written here!
+│ THE VALUE: nil       │
+└──────────────────────┘
+```
+
+The first line has `*Dog` written on it — it is not blank. Go sees that and says **"this interface is not nil"** — even though the value is nil.
+
+```go
+fmt.Println(s == nil) // false! because type *Dog is not nil
+```
+
+### Why this matters — the error example
 
 ```go
 type MyError struct{}
 func (e *MyError) Error() string { return "something broke" }
 
 func doSomething() error {
-    var err *MyError = nil // a nil pointer, but a real, non-nil TYPE
-    return err              // returns an interface wrapping (type=*MyError, value=nil)
+    var err *MyError = nil // typed nil — a nil *MyError
+    return err              // returns (type=*MyError, value=nil)
 }
 
 func main() {
@@ -211,16 +296,14 @@ func main() {
 }
 ```
 
-### Why does this happen?
-
 ```
 err's interface value = (type: *MyError, value: nil)
 nil                    = (type: nil,     value: nil)
 ```
 
-`err != nil` compares the whole pair, not just the value. Since `err`'s **type** is `*MyError` (not nil), the comparison `err != nil` is `true` — even though the underlying pointer is nil.
+`err != nil` compares the whole pair, not just the value. Since `err`'s **type** is `*MyError` (not nil), the comparison is `true` — even though the underlying pointer is nil. The post-it has `*MyError` on it, so it's not blank.
 
-> [!warning] The fix: **never return a typed nil pointer as an interface value if you intend "no error."** Return a literal `nil` directly instead.
+### The fix — return literal nil
 
 ```go
 func doSomething() error {
@@ -228,7 +311,7 @@ func doSomething() error {
     if somethingWentWrong {
         return errPtr // fine if genuinely returning an error
     }
-    return nil // ✅ return untyped nil directly — this really is a nil interface
+    return nil // ✅ return untyped nil — BLANK post-it, truly nil
 }
 ```
 
@@ -236,11 +319,21 @@ func doSomething() error {
 // The safest pattern: don't declare typed nil vars for errors at all
 func doSomething() error {
     if somethingWentWrong {
-        return &MyError{}
+        return &MyError{} // return a real error
     }
     return nil // clean, unambiguous
 }
 ```
+
+### The 3-second mental model
+
+| Code | What's in the interface | `== nil`? |
+|---|---|---|
+| `var s Speaker` | `(nothing, nothing)` | ✅ true |
+| `s = (*Dog)(nil)` | `(*Dog, nil)` | ❌ false — type is set |
+| `s = Dog{}` | `(Dog, {})` | ❌ false — value is set |
+| `return nil` | `(nil, nil)` | ✅ true |
+| `return typedNilPtr` | `(*Type, nil)` | ❌ false — trap! |
 
 ---
 
