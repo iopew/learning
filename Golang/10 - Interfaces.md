@@ -322,7 +322,7 @@ func doSomething() error {
         return &MyError{} // return a real error
     }
     return nil // clean, unambiguous
-}
+	}
 ```
 
 ### The 3-second mental model
@@ -737,20 +737,20 @@ errors.As(err, &target) // extract typed error info
 
 ### Key Rules to Remember
 
-|Rule|Detail|
-|---|---|
-|Contract, not inheritance|interfaces define behavior (what you CAN DO), not identity|
-|No `implements` keyword|satisfaction is implicit, structural, checked by the compiler|
-|Small interfaces|prefer 1-2 methods; more reusable, "the bigger the interface, the weaker the abstraction"|
-|Interface value|internally a (type, value) pair|
-|Nil interface trap|a nil concrete value in a non-nil-typed interface is NOT a nil interface|
-|Empty interface|zero methods, every type satisfies it — use sparingly|
-|Type assertion|prefer two-value form (`v, ok := x.(T)`) to avoid panics|
-|Type switch|cleanest way to branch across multiple possible concrete types|
-|Composition|build big interfaces from small ones via embedding|
-|Don't over-abstract|only introduce an interface when you have a real reason to|
-|Satisfaction check|`var _ Interface = (*Type)(nil)` catches mismatches at compile time|
-|`error` is an interface|just `Error() string` — same nil trap applies|
+| Rule                      | Detail                                                                                    |
+| ------------------------- | ----------------------------------------------------------------------------------------- |
+| Contract, not inheritance | interfaces define behavior (what you CAN DO), not identity                                |
+| No `implements` keyword   | satisfaction is implicit, structural, checked by the compiler                             |
+| Small interfaces          | prefer 1-2 methods; more reusable, "the bigger the interface, the weaker the abstraction" |
+| Interface value           | internally a (type, value) pair                                                           |
+| Nil interface trap        | a nil concrete value in a non-nil-typed interface is NOT a nil interface                  |
+| Empty interface           | zero methods, every type satisfies it — use sparingly                                     |
+| Type assertion            | prefer two-value form (`v, ok := x.(T)`) to avoid panics                                  |
+| Type switch               | cleanest way to branch across multiple possible concrete types                            |
+| Composition               | build big interfaces from small ones via embedding                                        |
+| Don't over-abstract       | only introduce an interface when you have a real reason to                                |
+| Satisfaction check        | `var _ Interface = (*Type)(nil)` catches mismatches at compile time                       |
+| `error` is an interface   | just `Error() string` — same nil trap applies                                             |
 
 ---
 
