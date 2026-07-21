@@ -124,7 +124,7 @@ Go/
 │     (%s, %q, %v, %T, %d for bytes), multiline strings,
 │     string comparison (lexicographic), performance gotchas
 │
-├── 08 - Pointers.md
+├── 08 - Pointers.md                     ✅ DONE
 │     What a pointer is, & and * operators, *T type syntax,
 │     nil pointers and panics, new(T), pointer to struct
 │     (automatic dereferencing), pass by pointer vs value
@@ -136,7 +136,7 @@ Go/
 │     escape analysis (stack vs heap), unsafe.Pointer
 │     (brief mention — when it exists and why to avoid it)
 │
-├── 09 - Structs & Methods.md
+├── 09 - Structs & Methods.md           ✅ DONE
 │     struct syntax, field access, struct literals (named
 │     vs positional), anonymous structs, zero value structs,
 │     struct embedding (composition over inheritance), promoted
@@ -149,7 +149,7 @@ Go/
 │     interfaces in structs, struct design patterns
 │     (functional options recap, builder pattern)
 │
-├── 10 - Interfaces.md
+├── 10 - Interfaces.md                  ✅ DONE
 │     What an interface is (a contract, not inheritance),
 │     implicit satisfaction (no implements keyword), defining
 │     interfaces, small interfaces (io.Reader, io.Writer,
@@ -165,7 +165,7 @@ Go/
 │     pattern (var _ Interface = (*Type)(nil)), errors as
 │     interfaces
 │
-├── 11 - Error Handling.md
+├── 11 - Error Handling.md              ✅ DONE
 │     error as an interface (Error() string), nil means no
 │     error, errors.New(), fmt.Errorf(), error wrapping
 │     (%w verb), errors.Is() (sentinel errors), errors.As()
@@ -179,7 +179,7 @@ Go/
 │     interface and type assertions, common mistakes
 │     (ignoring errors, over-wrapping, losing context)
 │
-├── 12 - Goroutines.md
+├── 12 - Goroutines.md                  ← NEXT
 |	│What a goroutine is (lightweight thread), go keyword,
 |	goroutines vs OS threads, goroutine scheduling (M:N
 |	scheduler, GOMAXPROCS), goroutine lifecycle, main
@@ -433,11 +433,11 @@ Go/
 ├── 05 - Arrays & Slices.md            ✅ DONE
 ├── 06 - Maps.md                       ✅ DONE
 ├── 07 - Strings & Runes.md            ✅ DONE
-├── 08 - Pointers.md                   ← NEXT
-├── 09 - Structs & Methods.md
-├── 10 - Interfaces.md
-├── 11 - Error Handling.md
-├── 12 - Goroutines.md
+├── 08 - Pointers.md                   ✅ DONE
+├── 09 - Structs & Methods.md         ✅ DONE
+├── 10 - Interfaces.md                ✅ DONE
+├── 11 - Error Handling.md            ✅ DONE
+├── 12 - Goroutines.md                ← NEXT
 ├── 13 - Channels.md
 ├── 14 - Sync Primitives.md
 ├── 15 - Generics.md

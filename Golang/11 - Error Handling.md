@@ -1303,6 +1303,8 @@ func getUsername(id int) (string, error) {
 
 ## 16. Error Handling in Goroutines
 
+> ⚠️ This section references goroutines, channels, `sync.WaitGroup`, and `errgroup`. If you have not yet covered [[12 - Goroutines]], **skip this section** and return to it after reading that file.
+
 Errors inside goroutines cannot be returned to the caller in the usual way — goroutines run independently and their return values are lost. You need a mechanism to get errors out.
 
 ### Problem — lost errors
