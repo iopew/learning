@@ -760,6 +760,7 @@ httpErr := &HTTPError{StatusCode: 401, Err: inner}
 
 fmt.Println(errors.Is(httpErr, inner))         // true
 fmt.Println(errors.Is(httpErr, os.ErrNotExist)) // false
+.
 ```
 
 ---
