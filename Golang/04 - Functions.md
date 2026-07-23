@@ -738,7 +738,7 @@ func withLogging(next http.HandlerFunc) http.HandlerFunc {
 }
 ```
 
-When `withLogging(getUsers)` is called, `next` = `getUsers` is locked in. The returned function remembers it forever — every request that comes in calls the right handler./
+When `withLogging(getUsers)` is called, `next` = `getUsers` is locked in. The returned function remembers it forever — every request that comes in calls the right handler.
 
 ### A complete example
 
