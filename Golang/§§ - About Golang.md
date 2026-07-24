@@ -180,20 +180,23 @@ Go/
 │     (ignoring errors, over-wrapping, losing context)
 │
 ├── 12 - Goroutines.md                  ← NEXT
-|	│What a goroutine is (lightweight thread), go keyword,
-|	goroutines vs OS threads, goroutine scheduling (M:N
-|	scheduler, GOMAXPROCS), goroutine lifecycle, main
-|	goroutine exits = all goroutines exit, sync.WaitGroup
-|	(Add, Done, Wait), goroutine stack (starts small,
-|	grows dynamically), goroutines and closures (the loop
-|	capture bug), DATA RACES (what they are, how to detect
-|	with -race flag), SYNC.MUTEX (Lock, Unlock, protecting
-|	shared resources, defer Unlock, NEVER copy a Mutex,
-|	RWMutex for read-heavy workloads), applying Mutex to
-|	maps and other shared data, goroutine leaks (how they
-|	happen, how to prevent), goroutine patterns (fire and
-|	forget, worker pool, fan-out), goroutines are not
-|	coroutines
+│     ├── 12.1 Fundamentals
+│     │     What a goroutine is, go keyword, vs OS threads,
+│     │     M:N scheduler (GOMAXPROCS, work stealing),
+│     │     dynamic stack, lifecycle, main exits = program exits
+│     │
+│     ├── 12.2 Safety & Leaks
+│     │     Loop capture bug (pre-1.22 vs 1.22+),
+│     │     data races & race detector (-race flag),
+│     │     goroutine panics (recover in goroutine only),
+│     │     goroutine leaks (causes, context cancellation)
+│     │
+│     └── 12.3 Patterns & Reference
+│           Core patterns (fire-and-forget, fan-out, worker pool,
+│           pipeline, timeout), goroutines vs coroutines,
+│           debugging (SIGQUIT, pprof, NumGoroutine),
+│           net/http (each request is a goroutine),
+│           quick reference cheatsheet
 │
 ├── 13 - Channels.md
 │     What a channel is (typed pipe), make(chan T),
@@ -202,23 +205,21 @@ Go/
 │     closing a channel (close()), receiving from closed
 │     channel (zero value + ok=false), range over channel,
 │     channel direction (chan<- T, <-chan T), select statement
-│     (recap + deep dive), channel patterns (done channel,
+│     (all variants), channel patterns (done channel,
 │     pipeline, fan-out, fan-in, semaphore, timeout),
 │     deadlocks (what causes them), nil channel behavior
-│     (blocks forever), channel vs mutex (when to use each),
-│     channel ownership (who creates, who closes)
+│     (blocks forever), channel ownership (who creates, who closes)
 │
 ├── 14 - Sync Primitives.md
-│     sync.Mutex (Lock, Unlock, defer Unlock pattern),
-│     sync.RWMutex (RLock, RUnlock for readers),
-│     sync.WaitGroup (coordinate goroutine completion),
-│     sync.Once (run something exactly once — singleton),
-│     sync.Map (concurrent map — when to use vs regular
-│     map + mutex), atomic operations (sync/atomic package:
-│     AddInt64, LoadInt64, StoreInt64, CompareAndSwap),
-│     race detector (-race flag), common concurrency patterns
-│     and mistakes (mutex copy bug, deadlock, livelock,
-│     starvation)
+│     sync.WaitGroup (Add/Done/Wait, Add before go, never copy,
+│     negative counter panic), sync.Mutex (Lock/Unlock, defer
+│     pattern, not reentrant, never copy, TryLock),
+│     sync.RWMutex (RLock/RUnlock, reader vs writer, writer
+│     starvation prevention), sync.Once (one-time init, panic
+│     behavior, retry limitation), sync.Map (when to use vs
+│     map + mutex), sync/atomic (AddT, LoadT, StoreT,
+│     CompareAndSwap, atomic.Bool), safe sharing patterns
+│     (maps, slices, structs with mutex), race detector usage
 │
 ├── 15 - Generics.md                       (partial in Functions)
 │     Full deep dive: type parameters syntax, constraints
@@ -467,11 +468,11 @@ When I say "let's explore topic X", create a **full, detailed Obsidian note** co
 
 **11 - Error Handling.md** `error` as an interface (`Error() string`), nil means no error, `errors.New()`, `fmt.Errorf()`, error wrapping (`%w` verb), `errors.Is()`, `errors.As()`, custom error types, sentinel errors (`io.EOF`, `sql.ErrNoRows`), error handling patterns (early return, guard clauses, wrapping with context), panic vs error, `log.Fatal` vs panic vs return error, multiple error strategies, error handling in goroutines, common mistakes (ignoring errors, over-wrapping, losing context)
 
-**12 - Goroutines.md** What a goroutine is, `go` keyword, goroutines vs OS threads, goroutine scheduling (M:N scheduler, GOMAXPROCS), goroutine lifecycle, main goroutine exits = all goroutines exit, goroutine leaks, `sync.WaitGroup`, goroutine patterns (fire and forget, worker pool, fan-out), goroutine stack (starts small, grows dynamically), goroutines and closures (loop capture bug), data races (`-race` flag)
+**12 - Goroutines.md** 3 sub-sections: **12.1 Fundamentals** (what, go keyword, vs OS threads, M:N scheduler, stack, lifecycle), **12.2 Safety & Leaks** (loop capture bug, data races & race detector, panics, leaks), **12.3 Patterns & Reference** (core patterns: fire-and-forget, fan-out, worker pool, pipeline, timeout; vs coroutines, debugging, net/http, cheatsheet)
 
 **13 - Channels.md** What a channel is, `make(chan T)`, unbuffered vs buffered channels, send and receive, closing a channel, receiving from closed channel, `range` over channel, channel direction (`chan<- T`, `<-chan T`), `select` statement deep dive, channel patterns (done channel, pipeline, fan-out, fan-in, semaphore, timeout), deadlocks, nil channel behavior, channel vs mutex, channel ownership
 
-**14 - Sync Primitives.md** `sync.Mutex`, `sync.RWMutex`, `sync.WaitGroup`, `sync.Once`, `sync.Map`, atomic operations (`sync/atomic`), race detector, common concurrency mistakes
+**14 - Sync Primitives.md** `sync.WaitGroup` (Add/Done/Wait, Add before go, never copy), `sync.Mutex` (Lock/Unlock, defer, not reentrant, never copy, TryLock), `sync.RWMutex` (RLock/RUnlock, writer starvation), `sync.Once` (one-time init, panic behavior), `sync.Map` (when to use vs map+mutex), `sync/atomic` (Add, Load, Store, CAS, atomic.Bool), safe sharing patterns (maps, slices, structs with mutex), race detector
 
 **15 - Generics.md** Full deep dive beyond what's in Functions note: generic types (structs + methods), generic interfaces, constraints package, real-world generic utilities (Map, Filter, Reduce, Contains, Keys, Values), when to use generics vs interfaces vs any, performance, limitations
 
@@ -563,3 +564,25 @@ These came up during conversation and were explained in detail — no need to re
 ---
 
 Paste this at the top of any new conversation and Claude will have full context to continue exactly where we left off.
+
+---
+
+## Context for OpenCode
+
+You are teaching me Go (Golang). Follow these rules precisely:
+
+### Style
+- **No water.** Be concise, precise, concrete. Cut fluff, verbose explanations, analogies, and content that belongs in other topics.
+- **Examples first.** Lead with runnable code, then explain.
+- **Obsidian format.** Use `[[#Section]]` wikilinks, `> [!note]`/`> [!warning]`/`> [!tip]` callouts, `go` syntax highlighting, frontmatter tags, and navigation links at the bottom.
+
+### How to handle requests
+- **"Let's explore [topic]"** — Create a full Obsidian note for that topic covering every listed point. Output as downloadable `.md`.
+- **"Explain this"** (code/screenshot) — Break it down step by step from scratch.
+- **"Make questions for Anki"** — Cover every section. No yes/no. Include code questions. Minimum 25-30.
+- **"Remove water from [topic]"** — Strip fluff, cut verbose explanations, remove off-topic content, keep concrete examples.
+- **"Update the document"** — Only change what was asked. Leave everything else untouched.
+- User says they don't understand — Explain more simply with fresh examples.
+
+### Curriculum state
+Topics 1-11 are complete. Current focus: concurrency (Goroutines 12 → Channels 13 → Sync Primitives 14 → rest).

@@ -8,25 +8,22 @@
 
 - [[#1. What is a Goroutine?]]
 - [[#2. The go Keyword — Starting a Goroutine]]
-- [[#3. Goroutines vs OS Threads]]
-- [[#4. Goroutine Scheduling — The M:N Scheduler]]
-- [[#5. Goroutine Stack — Starts Small, Grows Dynamically]]
-- [[#6. Goroutine Lifecycle]]
-- [[#7. sync.WaitGroup — Waiting for Goroutines]]
-- [[#8. Closures and the Loop Capture Bug]]
-- [[#9. Data Races — What They Are and How to Detect Them]]
-- [[#10. sync.Mutex — Protecting Shared Resources]]
-- [[#11. sync.RWMutex — Read-Heavy Workloads]]
-- [[#12. Safely Sharing Maps, Slices, and Other Data]]
-- [[#13. sync/atomic — Lock-Free Operations for Simple Cases]]
-- [[#14. sync.Once — One-Time Initialization]]
-- [[#15. Goroutine Panics — What Happens and How to Handle Them]]
-- [[#16. Goroutine Leaks — How They Happen and How to Prevent Them]]
-- [[#17. Goroutine Patterns]]
-- [[#18. Goroutines Are Not Coroutines]]
-- [[#19. Debugging Goroutines]]
-- [[#20. Goroutines and the net/http Server]]
-- [[#21. Quick Reference Cheatsheet]]
+- [[#12.1 Goroutines: Fundamentals]]
+  - [[#12.1.1 Goroutines vs OS Threads]]
+  - [[#12.1.2 Goroutine Scheduling — The M:N Scheduler]]
+  - [[#12.1.3 Goroutine Stack — Starts Small, Grows Dynamically]]
+  - [[#12.1.4 Goroutine Lifecycle]]
+- [[#12.2 Goroutines: Safety & Leaks]]
+  - [[#12.2.1 Closures and the Loop Capture Bug]]
+  - [[#12.2.2 Data Races and the Race Detector]]
+  - [[#12.2.3 Goroutine Panics]]
+  - [[#12.2.4 Goroutine Leaks]]
+- [[#12.3 Goroutines: Patterns & Reference]]
+  - [[#12.3.1 Goroutine Patterns]]
+  - [[#12.3.2 Goroutines Are Not Coroutines]]
+  - [[#12.3.3 Debugging Goroutines]]
+  - [[#12.3.4 Goroutines and the net/http Server]]
+  - [[#12.3.5 Quick Reference Cheatsheet]]
 
 ---
 
@@ -246,19 +243,19 @@ go func(id int) {
 
 ---
 
-## 3. Goroutines vs OS Threads
+## 12.1 Goroutines: Fundamentals
 
-| Aspect             | Goroutine                                  | OS Thread                          |
-| ------------------ | ------------------------------------------ | ---------------------------------- |
-| **Stack size**     | Starts at ~4 KB, grows/shrinks dynamically | Fixed at ~1 MB (or larger)         |
-| **Creation cost**  | ~1-2 μs                                    | ~10-100 μs                         |
-| **Context switch** | User-space, ~10-100 ns                     | Kernel-space, ~1-10 μs             |
-| **Max count**      | Millions per GB of RAM                     | Thousands per GB of RAM            |
-| **Scheduling**     | Go runtime (user-space)                    | OS kernel                          |
-| **Identity**       | No ID, no handle                           | Has PID/TID, killable from outside |
-| **Startup memory** | ~4 KB                                      | ~1 MB + kernel bookkeeping         |
+### 12.1.1 Goroutines vs OS Threads
 
-### What this means in practice
+| Aspect | Goroutine | OS Thread |
+|---|---|---|
+| **Stack size** | Starts at ~4 KB, grows/shrinks dynamically | Fixed at ~1 MB (or larger) |
+| **Creation cost** | ~1-2 µs | ~10-100 µs |
+| **Context switch** | User-space, ~10-100 ns | Kernel-space, ~1-10 µs |
+| **Max count** | Millions per GB of RAM | Thousands per GB of RAM |
+| **Scheduling** | Go runtime (user-space) | OS kernel |
+| **Identity** | No ID, no handle | Has PID/TID, killable from outside |
+| **Startup memory** | ~4 KB | ~1 MB + kernel bookkeeping |
 
 ```go
 // 100,000 goroutines — perfectly viable
@@ -268,23 +265,19 @@ for i := 0; i < 100_000; i++ {
     }(i)
 }
 fmt.Println(runtime.NumGoroutine()) // 100001 (including main)
-
-// 100,000 OS threads — would crash most machines
 ```
 
 Each OS thread reserves ~1 MB of virtual memory for its stack. 100,000 threads × 1 MB = ~100 GB before any code runs. Goroutines start at ~4 KB, so 100,000 goroutines × 4 KB = ~400 MB — and most of that never grows beyond the initial allocation.
 
-### Goroutines are multiplexed onto threads
-
-The operating system sees only a handful of threads (typically `GOMAXPROCS` threads running user code, plus a few for syscalls and the garbage collector). The Go runtime schedules thousands of goroutines onto those few threads. From the OS's perspective, the program behaves like a small-threaded application — even if the Go program spawns millions of goroutines.
+The OS sees only a handful of threads (typically `GOMAXPROCS` threads running user code, plus a few for syscalls and GC). The Go runtime schedules thousands of goroutines onto those few threads.
 
 ---
 
-## 4. Goroutine Scheduling — The M:N Scheduler
+### 12.1.2 Goroutine Scheduling — The M:N Scheduler
 
 Go implements an **M:N scheduling** model: **M** goroutines are multiplexed onto **N** OS threads.
 
-### The G-M-P model
+#### The G-M-P model
 
 ```
 ┌──────────┐   ┌──────────┐   ┌──────────┐
@@ -306,111 +299,69 @@ Go implements an **M:N scheduling** model: **M** goroutines are multiplexed onto
 └────────────┘  └────────────┘  └────────────┘
 ```
 
-Three abstractions work together:
-
-- **G (Goroutine)** — represents a goroutine. Contains the stack, instruction pointer, and other state needed to resume execution. This is what your code runs on.
-- **M (Machine)** — an OS thread. The M executes Go code by picking up a G and running it. M's are created and destroyed by the runtime as needed.
+- **G (Goroutine)** — represents a goroutine. Contains the stack, instruction pointer, and state needed to resume execution.
+- **M (Machine)** — an OS thread. Executes Go code by picking up a G and running it.
 - **P (Processor)** — a resource that makes an M capable of running Go code. Each P has a local run queue of Gs. `GOMAXPROCS` controls the number of Ps.
 
-### The rule: An M can only run Go code if it holds a P
+**Rule:** An M can only run Go code if it holds a P. Without a P, the M blocks in the kernel or spins waiting.
 
-If an M does not have a P, it cannot execute goroutines — it blocks in the kernel (e.g., during a syscall) or spins waiting for a P.
-
-### How goroutines are scheduled step by step
+#### How scheduling works
 
 ```
-1. A goroutine is created (go f())
-2. It is placed in the current P's local run queue
-3. When an M becomes available (or the current goroutine blocks):
-   a. The M picks a G from its P's local run queue
-   b. If the local queue is empty, it steals Gs from another P's queue (work stealing)
-   c. If all queues are empty, the M spins or parks
-4. The M executes the G until the G blocks or is preempted
-5. When the G blocks (I/O, channel, mutex):
-   a. The G is moved to a waiting state
-   b. The M picks another G from the queue and runs it
-6. When the G unblocks, it is placed back in a run queue
+1. go f() creates a G → placed in current P's local run queue
+2. When an M is free:
+   a. M picks a G from its P's local queue
+   b. If empty, it steals Gs from another P's queue (work stealing)
+   c. If all queues empty, M spins or parks
+3. M executes G until G blocks or is preempted
+4. When G blocks (I/O, channel, mutex):
+   a. G moves to waiting state
+   b. M picks another G and runs it
+5. When G unblocks → placed back in a run queue
 ```
 
-### Work stealing
+#### Work stealing
 
-When a P's local run queue is empty, it becomes a **thief** — it picks another P at random and steals approximately half of its goroutines. This ensures load is balanced across all processors without a central queue bottleneck.
+When a P's local queue is empty, it becomes a **thief** — it picks another P at random and steals ~half its goroutines. This balances load without a central queue bottleneck.
+
+```
+P1 queue: [G1, G2, G3, G4, G5, G6]
+P2 queue: []  ← empty!
+
+P2 steals from P1:
+P1 queue: [G1, G2, G3]
+P2 queue: [G4, G5, G6]
+```
+
+#### Cooperative preemption
+
+Pre-Go 1.14, a goroutine in a tight loop could **starve** all others on the same P:
 
 ```go
-// Visual of work stealing:
-// P1 queue: [G1, G2, G3, G4, G5, G6]
-// P2 queue: []  ← empty!
-
-// P2 steals from P1:
-// P1 queue: [G1, G2, G3]
-// P2 queue: [G4, G5, G6]
-```
-
-This is one reason Go scales well on multicore machines — no single lock protects the global run queue (there is one, but it's rarely used).
-
-### Cooperative preemption
-
-Before Go 1.14, a goroutine in a tight loop could **starve** all other goroutines on the same P — it never yielded, so the scheduler never ran another goroutine.
-
-```go
-// PRE-Go 1.14: this goroutine could run forever, starving others
 go func() {
     for {
-        // no function calls, no I/O, no channel operations
+        // no function calls, no I/O, no channel ops — runs forever
     }
 }()
-
-// Go 1.14+: the runtime sends a signal (SIGURG) to preempt tight loops
-// The goroutine is eventually interrupted and another is scheduled
 ```
 
-Go 1.14 introduced **asynchronous preemption** — the runtime uses OS signals to interrupt long-running goroutines even if they never yield. This means tight loops no longer block the scheduler indefinitely. However, very tight loops (nanoseconds per iteration) can still delay scheduling briefly.
+Go 1.14+ uses **asynchronous preemption** — the runtime sends a signal (SIGURG) to interrupt long-running goroutines even if they never yield. Very tight loops (ns/iteration) can still delay scheduling briefly.
 
-### Explicit yielding
+#### GOMAXPROCS
 
 ```go
-import "runtime"
-
-// Explicitly yield the processor — let other goroutines run
-runtime.Gosched()
+runtime.GOMAXPROCS(0) // get current value (typically # of CPU cores)
+runtime.GOMAXPROCS(8) // set to 8
 ```
 
-`runtime.Gosched()` yields the current goroutine's remaining time slice. The goroutine is placed at the back of the run queue. Use it sparingly — in most code, blocking calls handle yielding naturally.
+Controls the number of OS threads executing user-level Go code simultaneously. Defaults to CPU core count.
 
-### GOMAXPROCS
+- `GOMAXPROCS = 1` → concurrent but not parallel (interleaved on one thread)
+- `GOMAXPROCS = N` → up to N goroutines run **in parallel**
 
-```go
-import "runtime"
+> [!tip] The default is optimal for most apps. Lower = less parallelism for CPU-bound work. Higher than core count rarely helps and can hurt due to thread contention. IO-bound workloads sometimes benefit from a higher value.
 
-fmt.Println(runtime.GOMAXPROCS(0)) // current value (typically # of CPU cores)
-runtime.GOMAXPROCS(8)              // set to 8
-```
-
-`GOMAXPROCS` sets the maximum number of OS threads that can execute user-level Go code simultaneously. It defaults to the number of CPU cores.
-
-- `GOMAXPROCS = 1` → **concurrent but not parallel** — goroutines interleave on one thread
-- `GOMAXPROCS = N` → up to N goroutines can run **in parallel**
-
-```go
-// Set via environment variable
-// GOMAXPROCS=4 go run main.go
-
-// Or in code (not recommended after init — affects global scheduler)
-runtime.GOMAXPROCS(2) // limit to 2 parallel threads
-```
-
-> [!tip] In most applications, the default is optimal. Lowering GOMAXPROCS can reduce parallelism for CPU-bound work. Raising it above the core count rarely helps and can hurt due to thread contention. The exception: IO-bound workloads sometimes benefit from a higher value because goroutines block on I/O frequently and the extra threads fill in while others wait.
-
-### sysmon — the system monitor
-
-The Go runtime runs a special goroutine called **sysmon** (system monitor). It does not need a P to run. sysmon's responsibilities:
-
-- Preempt long-running goroutines (the signal-based preemption)
-- Detect blocked network I/O and unblock goroutines
-- Detect deadlocks (if no goroutines can make progress)
-- Force the garbage collector to run after a certain interval
-
-### Goroutine states
+#### Goroutine states
 
 ```
    ┌──────────┐
@@ -430,21 +381,19 @@ The Go runtime runs a special goroutine called **sysmon** (system monitor). It d
    └────────────┘
 ```
 
-A goroutine cycles through these states. The scheduler moves goroutines between Runnable and Running. Blocking operations move them to Waiting, and completion of the blocking operation moves them back to Runnable.
-
 ---
 
-## 5. Goroutine Stack — Starts Small, Grows Dynamically
+### 12.1.3 Goroutine Stack — Starts Small, Grows Dynamically
 
-Each goroutine starts with a **tiny stack** (~4 KB) that grows and shrinks as needed — unlike OS threads, which have a fixed 1 MB+ stack that is mostly wasted.
+Each goroutine starts with ~4 KB of stack, growing and shrinking as needed — unlike OS threads with a fixed 1 MB+ stack.
 
-### Growth mechanism
+#### Growth mechanism
 
-When a goroutine's stack is too small, the runtime triggers a **stack copy**:
+When the stack is too small, the runtime does a **stack copy**:
 
-1. Allocate a new, larger stack (typically 2× the current size)
-2. Copy all existing data from the old stack to the new one
-3. Update all pointers on the stack (the compiler emits metadata to make this possible — known as **stack maps**)
+1. Allocate a new stack (typically 2× current size)
+2. Copy all data from old stack to new
+3. Update all pointers on the stack (compiler emits metadata — **stack maps**)
 4. Free the old stack
 
 ```go
@@ -458,45 +407,33 @@ func deepRecursion(n int) {
 
 go deepRecursion(100)
 // Stack starts at 4 KB
-// After ~4 frames, the stack is full → copy to 8 KB
+// After ~4 frames → copy to 8 KB
 // After ~12 frames → copy to 16 KB
 // After ~28 frames → copy to 32 KB
-// ... and so on
 ```
 
-### Stack shrinking
+#### Stack shrinking
 
-When a goroutine finishes a deep call and returns to a shallow call depth, the runtime may **shrink** the stack to free memory. This is why goroutines are memory-efficient for bursty workloads.
+After a deep call returns to shallow depth, the runtime may **shrink** the stack to free memory. This makes goroutines memory-efficient for bursty workloads.
 
-### What happens if the stack can't grow
+#### Stack overflow
 
-The stack is not infinite. If a goroutine's stack keeps growing (e.g., infinite recursion or a very large allocation on the stack), it will eventually exhaust the available address space and crash:
+Infinite recursion eventually hits the ~1 GB limit on 64-bit systems:
 
 ```go
 func infiniteRecursion() {
-    infiniteRecursion() // stack grows until... runtime: goroutine stack exceeds 1000000000-byte limit
+    infiniteRecursion()
+    // runtime: goroutine stack exceeds 1000000000-byte limit
 }
 ```
 
-The limit is ~1 GB per goroutine on 64-bit systems — far beyond any reasonable use. The runtime prints a stack trace and exits the program when this limit is reached.
-
-### Why dynamic stacks matter
-
-Without them, you'd have to choose between:
-- **Big stacks** (OS thread model) — wasting memory for the common case
-- **Manual stack management** — like C with `getcontext`/`makecontext`, error-prone and slow
-
-Go's dynamic stacks give you the safety of big stacks with the efficiency of small ones.
-
 ---
 
-## 6. Goroutine Lifecycle
+### 12.1.4 Goroutine Lifecycle
 
-### The main goroutine
+#### The main goroutine
 
-When your program starts, it runs as a single goroutine — the **main goroutine** (the one executing `main()`). All other goroutines are descendants.
-
-### Main exits = program exits
+When `main()` starts, it runs as a single goroutine — the **main goroutine**. All others are descendants.
 
 ```go
 func main() {
@@ -504,15 +441,15 @@ func main() {
         time.Sleep(1 * time.Second)
         fmt.Println("never prints")
     }()
-    // main returns immediately — the program exits, killing all goroutines
+    // main returns — program exits, all goroutines die
 }
 ```
 
-When `main()` returns, the Go runtime terminates the process immediately — all goroutines are killed without warning. This is **not** a clean shutdown; defers in other goroutines do not run, and resources are not released.
+**When `main()` returns, the process terminates immediately.** All goroutines are killed without warning. Defers in other goroutines do not run. Resources are not released.
 
-### Three ways to prevent premature program exit
+#### Preventing premature exit
 
-#### 1. WaitGroup (preferred for fire-and-forget work)
+Use `sync.WaitGroup` to wait for goroutines:
 
 ```go
 var wg sync.WaitGroup
@@ -524,219 +461,58 @@ go func() {
 wg.Wait() // blocks until Done is called
 ```
 
-#### 2. Channel receive (for signaling)
+> [!warning] `wg.Add` must be called **before** the goroutine starts, not inside it. See [[14 - Sync Primitives]] for full `WaitGroup` coverage.
 
-```go
-done := make(chan bool)
-go func() {
-    doWork()
-    done <- true
-}()
-<-done // blocks until a value is sent
-```
-
-#### 3. Select + multiple goroutines
-
-```go
-done := make(chan bool, 1)
-go func() { doWork(1); done <- true }()
-go func() { doWork(2); done <- true }()
-
-// Wait for both
-<-done
-<-done
-```
-
-### A goroutine's natural end
+#### A goroutine's natural end
 
 A goroutine exits when the function it was running returns (or panics without recovery):
 
 ```go
 go func() {
     fmt.Println("I run")
-    // implicit return at the end → goroutine exits
+    // implicit return → goroutine exits
 }()
 ```
 
-### Can you restart a goroutine?
+You cannot restart a goroutine. Once it exits, it's gone. Spawn a new one if needed.
 
-No. Once a goroutine exits, it's gone. If you need it again, you spawn a new one. There is no `join`, `restart`, or `resume` — goroutines are not coroutines.
-
-### runtime.Goexit()
-
-A goroutine can exit itself by calling `runtime.Goexit()`:
+#### runtime.Goexit()
 
 ```go
 func worker() {
     defer fmt.Println("cleanup still runs!")
     runtime.Goexit()    // exit the goroutine
-    fmt.Println("never prints") // unreachable
+    fmt.Println("never prints")
 }
 
 go worker()
 ```
 
-`runtime.Goexit()` terminates the calling goroutine **after** running all deferred functions. This is different from a panic — defers run normally, but the function exits immediately after the defer chain completes.
+`runtime.Goexit()` terminates the calling goroutine **after** running all deferred functions. Unlike panic, defers run normally, and the function exits after the defer chain completes.
 
 ---
 
-## 7. sync.WaitGroup — Waiting for Goroutines
+## 12.2 Goroutines: Safety & Leaks
 
-`sync.WaitGroup` is a counter-based synchronisation primitive. It blocks the calling goroutine until an internal counter reaches zero. It is the most common way to wait for a group of goroutines to finish.
-
-### The three methods
-
-```go
-var wg sync.WaitGroup
-
-wg.Add(delta int)  // increment the counter (usually 1)
-wg.Done()           // decrement the counter by 1
-wg.Wait()           // block until the counter reaches 0
-```
-
-### Basic usage
-
-```go
-func main() {
-    var wg sync.WaitGroup
-
-    for i := 1; i <= 5; i++ {
-        wg.Add(1)
-        go func(id int) {
-            defer wg.Done()
-            fmt.Println("worker", id, "started")
-            time.Sleep(time.Duration(id) * 100 * time.Millisecond)
-            fmt.Println("worker", id, "done")
-        }(i)
-    }
-
-    wg.Wait()
-    fmt.Println("all workers finished")
-}
-```
-
-### The Add before go rule
-
-`Add` must be called **before** the goroutine starts, not inside it:
-
-```go
-// WRONG — race: wg.Wait() may run before Add is called
-for i := 0; i < 5; i++ {
-    go func() {
-        wg.Add(1)          // too late! Wait might already be running
-        defer wg.Done()
-        // ...
-    }()
-}
-wg.Wait() // might return immediately with counter = 0
-
-// RIGHT ───────────────
-for i := 0; i < 5; i++ {
-    wg.Add(1) // counter is incremented BEFORE the goroutine starts
-    go func() {
-        defer wg.Done()
-        // ...
-    }()
-}
-wg.Wait()
-```
-
-### Add with a known total
-
-```go
-numJobs := 20
-wg.Add(numJobs) // add all at once
-for i := 0; i < numJobs; i++ {
-    go func(id int) {
-        defer wg.Done()
-        process(id)
-    }(i)
-}
-wg.Wait()
-```
-
-This is slightly more efficient than calling `Add(1)` inside the loop (one atomic operation instead of 20 counter adjustments).
-
-### Negative counter panics
-
-```go
-wg.Add(1)
-wg.Done()
-wg.Done() // panic: sync: negative WaitGroup counter
-```
-
-Calling `Done` (or `Add` with a negative delta) more times than the counter allows causes a runtime panic. The counter must never go below zero.
-
-### WaitGroup is not for reuse with different counter patterns
-
-Once `Wait` returns and the counter is back to zero, the WaitGroup can be reused:
-
-```go
-var wg sync.WaitGroup
-
-for _, batch := range batches {
-    for _, item := range batch {
-        wg.Add(1)
-        go func(it Item) {
-            defer wg.Done()
-            process(it)
-        }(item)
-    }
-    wg.Wait() // wait for this batch before starting the next
-}
-```
-
-But be careful — all `Add` calls must be done before `Wait` begins. Calling `Add` while `Wait` is already running is a data race.
-
-### Never copy a WaitGroup
-
-```go
-// WRONG — copying copies the internal state (counter, semaphore)
-func processItems(items []string, wg sync.WaitGroup) { // copy!
-    for _, item := range items {
-        wg.Add(1)
-        go func(s string) {
-            defer wg.Done()
-            // ...
-        }(item)
-    }
-}
-// The original wg in the caller NEVER sees these Done calls!
-
-// RIGHT — pass by pointer
-func processItems(items []string, wg *sync.WaitGroup) {
-    for _, item := range items {
-        wg.Add(1)
-        go func(s string) {
-            defer wg.Done()
-            // ...
-        }(item)
-    }
-}
-```
-
-> [!warning] `sync.WaitGroup` (and all `sync` types) must never be copied — pass them by pointer. If you embed one in a struct, pass the struct by pointer.
-
----
-
-## 8. Closures and the Loop Capture Bug
+### 12.2.1 Closures and the Loop Capture Bug
 
 When a goroutine closure captures a loop variable, it captures the **variable itself** (the memory location), not the value at the time the goroutine was created.
 
-### The classic bug
+#### Pre-Go 1.22: the bug
 
 ```go
-// WRONG — prints 3, 3, 3 (pre-Go 1.22) or random (Go 1.22+)
+// WRONG — all goroutines likely print the final value of i
 for i := 1; i <= 3; i++ {
     go func() {
-        fmt.Println(i) // captures the variable i, not its value
+        fmt.Println(i) // captures variable i, not its value
     }()
 }
+// Typical output (pre-1.22): 3, 3, 3
 ```
 
-Since Go 1.22, each loop iteration creates a new `i`, so this is safe. But understanding the old behavior is important for historical code.
+Pre-Go 1.22, the loop variable is a single memory location reassigned each iteration. The closure holds a reference to that location. By the time the goroutine runs, the variable is at its final value.
 
-### Pre-Go 1.22: the fix
+#### Pre-Go 1.22: the fix
 
 ```go
 for i := 1; i <= 3; i++ {
@@ -747,12 +523,22 @@ for i := 1; i <= 3; i++ {
 }
 ```
 
-### The same bug with range (pre-Go 1.22)
+Or pass the value as a parameter:
+
+```go
+for i := 1; i <= 3; i++ {
+    go func(id int) {
+        fmt.Println(id) // id is a copy
+    }(i)
+}
+```
+
+#### Range variant
 
 ```go
 items := []string{"a", "b", "c"}
 
-// WRONG — all goroutines print "c"
+// WRONG — all goroutines print "c" (pre-1.22)
 for _, item := range items {
     go func() {
         fmt.Println(item)
@@ -768,40 +554,30 @@ for _, item := range items {
 }
 ```
 
-### Why this happens
+#### Go 1.22+ behavior
 
-In Go (pre-1.22), the loop variable is a single memory location that gets reassigned each iteration. The goroutine closure holds a reference to that location, not a copy of the value. By the time the goroutine runs (which could be microseconds later), the variable has moved to its final value.
-
-### Go 1.22+ behavior
+Since Go 1.22, each loop iteration creates a new variable — the bug is fixed:
 
 ```go
-// Go 1.22+ — each iteration gets a new i, no bug
+// Go 1.22+ — safe, each iteration gets a new i
 for i := range 3 {
     go func() {
-        fmt.Println(i) // safe — prints 0, 1, 2
+        fmt.Println(i) // prints 0, 1, 2
     }()
 }
 ```
 
-> [!tip] The `i := i` idiom is still harmless in Go 1.22+ and makes your code safe to backport or use with older tools. Many teams keep it as a defensive habit.
+The `i := i` idiom is harmless in 1.22+ and makes code safe to backport. Many teams keep it as a defensive habit.
 
-### This applies to all closures, not just goroutines
-
-```go
-var funcs []func()
-for i := 0; i < 3; i++ {
-    funcs = append(funcs, func() { fmt.Println(i) })
-}
-funcs[0]() // prints 3 (pre-Go 1.22), not 0
-```
+> [!tip] This applies to all closures, not just goroutines — deferred functions, callbacks, and stored `func()` values all exhibit the same capture behavior.
 
 ---
 
-## 9. Data Races — What They Are and How to Detect Them
+### 12.2.2 Data Races and the Race Detector
 
-A **data race** happens when two or more goroutines access the same memory location concurrently, and at least one access is a write.
+A **data race** occurs when two or more goroutines access the same memory concurrently, and at least one access is a write.
 
-### The canonical example
+#### The canonical example
 
 ```go
 var counter int
@@ -819,51 +595,31 @@ func main() {
 
 `counter++` compiles to three operations:
 ```
-LOAD  counter  → register
+LOAD  counter → register
 INC   register
 STORE register → counter
 ```
 
-Two goroutines can interleave like this:
+Two goroutines can interleave:
 ```
 Goroutine A: LOAD counter (0) → INC → STORE (1)
 Goroutine B:                    LOAD counter (0) → INC → STORE (1)
-Result: counter = 1, but we expected 2!
+Result: counter = 1, but expected 2!
 ```
 
-### Types of races
-
-#### 1. Read-write race
-
 ```go
+// Read-write race
 var x int
 go func() { fmt.Println(x) }() // read
 go func() { x = 42 }()         // write — race!
-```
 
-#### 2. Write-write race
-
-```go
-var x int
-go func() { x = 1 }() // write
-go func() { x = 2 }() // write — race!
-```
-
-#### 3. Slice/map races
-
-```go
+// Concurrent map access — panics, not just wrong
 m := make(map[int]int)
 go func() { m[1] = 1 }() // write
-go func() { _ = m[1] }() // read — concurrent map access, PANIC!
-
-s := make([]int, 1)
-go func() { s[0] = 1 }() // write
-go func() { _ = s[0] }() // read — race!
+go func() { _ = m[1] }() // read → fatal error: concurrent map read and map write
 ```
 
-### The race detector
-
-Go's toolchain includes a **race detector** — enable it with the `-race` flag:
+#### The race detector
 
 ```bash
 go run -race main.go
@@ -873,7 +629,7 @@ go test -race ./...
 
 When it detects a race, it prints a detailed report:
 
-```text
+```
 $ go run -race racy.go
 ==================
 WARNING: DATA RACE
@@ -895,535 +651,40 @@ Goroutine 6 (finished) created at:
 ==================
 ```
 
-The report tells you:
-- What operation (read/write) and at which line
-- Which goroutines were involved
-- The stack trace showing where each goroutine was created
+The report tells you: the operation (read/write), the line, which goroutines were involved, and where each was created.
 
-### Limitations of the race detector
+#### Limitations
 
-- **Only finds races that actually occur** during execution — it is dynamic analysis, not static. Untested code paths may hide races.
-- **Adds ~5-10× slowdown** and ~2-5× memory overhead. Not for production, but use it constantly during development.
-- **Does not detect all races** — the Go memory model is subtle, and the race detector uses the C/C++ ThreadSanitizer under the hood, which has known blind spots (though they are rare).
+- **Dynamic analysis** — only finds races that actually occur during execution. Untested code paths may hide races.
+- **~5-10× slowdown**, ~2-5× memory overhead. Use during development, not in production.
+- A clean race run means "no races in this specific execution" — not "no races, period." Run tests many times under load.
 
-### Best practice
-
-```bash
-# Always test with -race before committing
-go test -race -count=1 ./...
-```
-
-> [!warning] The race detector only proves the presence of races, not their absence. A clean race run means "no races in this specific execution" — not "no races, period." Run your tests many times, ideally under load.
+> [!warning] Always test with `-race` before committing:
+> ```bash
+> go test -race -count=1 ./...
+> ```
 
 ---
 
-## 10. sync.Mutex — Protecting Shared Resources
+### 12.2.3 Goroutine Panics
 
-A **mutex** (mutual exclusion lock) ensures that only one goroutine can access a critical section at a time.
-
-### Basic usage
-
-```go
-var (
-    counter int
-    mu      sync.Mutex
-)
-
-func increment() {
-    mu.Lock()
-    counter++ // only one goroutine at a time
-    mu.Unlock()
-}
-```
-
-### The idiomatic defer pattern
-
-```go
-func increment() {
-    mu.Lock()
-    defer mu.Unlock()
-    counter++
-}
-```
-
-Use `defer` even in simple cases — it ensures unlock happens if the function:
-- Returns early
-- Panics
-
-### Lock and Unlock must always be paired
-
-```go
-mu.Lock()
-mu.Lock() // deadlock! sync.Mutex is not reentrant
-```
-
-A `sync.Mutex` is **not reentrant** — if the same goroutine locks it twice, it deadlocks. This is by design: reentrant locks hide bad code.
-
-### NEVER copy a mutex
-
-```go
-type Counter struct {
-    mu sync.Mutex
-    n  int
-}
-
-// WRONG — copying c copies the mutex
-func process(c Counter) { // copy!
-    c.mu.Lock() // this lock protects the COPY, not the original
-    c.n++
-    c.mu.Unlock()
-}
-
-// RIGHT — pass by pointer
-func process(c *Counter) {
-    c.mu.Lock()
-    c.n++
-    c.mu.Unlock()
-}
-```
-
-If a struct embeds a `sync.Mutex`, pass the struct by pointer, not by value.
-
-### Mutex protects data, not code
-
-```go
-var (
-    balance int
-    mu      sync.Mutex
-)
-
-func getBalance() int {
-    // WRONG — reading without the lock
-    return balance
-}
-
-func getBalance() int {
-    // RIGHT — every access to balance must hold the lock
-    mu.Lock()
-    defer mu.Unlock()
-    return balance
-}
-```
-
-The mutex protects the **data**. Every goroutine that touches the data — reads or writes — must hold the same mutex. One goroutine writing with `mu.Lock()` while another reads without `mu.Lock()` is still a data race.
-
-### TryLock (Go 1.18+)
-
-```go
-if mu.TryLock() {
-    defer mu.Unlock()
-    fmt.Println("got the lock, doing work")
-} else {
-    fmt.Println("lock is held by another goroutine, skipping")
-}
-```
-
-`TryLock` attempts to acquire the lock and returns `true` if successful without blocking. Use it sparingly — it is typically a sign of questionable design. Most code should use `Lock` and block.
-
-### Mutex performance
-
-- An uncontended `Lock`/`Unlock` pair costs ~25 ns (a few dozen CPU cycles)
-- A contended lock causes goroutines to be descheduled (→ the goroutine blocks, the M picks up another G)
-- Keep critical sections small — do I/O outside the lock, not inside it
-
----
-
-## 11. sync.RWMutex — Read-Heavy Workloads
-
-`sync.RWMutex` distinguishes between **readers** and **writers**:
-
-- **Multiple readers** can hold `RLock` simultaneously
-- **A writer** requires exclusive access via `Lock` — no readers, no other writers
-
-### Basic usage
-
-```go
-var (
-    cache   map[string]string
-    cacheMu sync.RWMutex
-)
-
-func get(key string) (string, bool) {
-    cacheMu.RLock()
-    defer cacheMu.RUnlock()
-    v, ok := cache[key]
-    return v, ok
-}
-
-func set(key, value string) {
-    cacheMu.Lock()
-    defer cacheMu.Unlock()
-    cache[key] = value
-}
-```
-
-### When to use RWMutex vs Mutex
-
-| Scenario | Use | Why |
-|---|---|---|
-| Reads: 1000/s, Writes: 1/s | `RWMutex` | Readers don't block each other — massive throughput win |
-| Reads: 100/s, Writes: 100/s | `Mutex` | RWMutex overhead for tracking readers isn't worth it |
-| Reads: 1/s, Writes: 1/s | `Mutex` | Simpler, faster for low contention |
-
-### Writer starvation prevention
-
-When a writer calls `Lock`, the mutex typically blocks new readers, preventing writer starvation. This means if a writer is waiting, incoming readers are queued behind it rather than jumping ahead.
-
-```go
-// Timeline of events:
-// T1: Reader acquires RLock ✅ (1 reader active)
-// T2: Reader acquires RLock ✅ (2 readers active)
-// T3: Writer calls Lock    ⏳ (blocked — waiting for readers)
-// T4: Reader calls RLock   ⏳ (blocked — writer is waiting, prevents starvation)
-// T5: T1 releases RUnlock  (1 reader active)
-// T6: T2 releases RUnlock  (0 readers active)
-// T7: Writer acquires Lock ✅ (writer goes first, as promised)
-// T8: T4 Reader acquires RLock ✅ (after writer unlocks)
-```
-
-This behavior is not strictly guaranteed by the spec, but the standard implementation does it. Never rely on it for correctness — it's a fairness heuristic, not a contract.
-
-### Rules
-
-- `RLock` / `RUnlock` — many goroutines can hold it concurrently
-- `Lock` / `Unlock` — exclusive, blocks all readers and writers
-- Never copy an `RWMutex` (same rule as `sync.Mutex`)
-- Must pair `RLock` with `RUnlock` and `Lock` with `Unlock`
-
----
-
-## 12. Safely Sharing Maps, Slices, and Other Data
-
-### Maps are not safe for concurrent access
-
-Go maps **panic** when accessed concurrently by multiple goroutines where at least one writes:
-
-```go
-var m = make(map[int]int)
-
-for i := 0; i < 10; i++ {
-    go func(k int) {
-        m[k] = k * 2 // concurrent write → fatal error: concurrent map writes
-    }(i)
-}
-// panic: fatal error: concurrent map writes
-```
-
-Even one concurrent write + one concurrent read panics:
-
-```go
-go func() { m[1] = 1 }()  // write
-go func() { _ = m[2] }()  // read → fatal error: concurrent map read and map write
-```
-
-### Fix 1 — Mutex-protected map
-
-```go
-type SafeMap struct {
-    mu sync.Mutex
-    m  map[string]int
-}
-
-func (s *SafeMap) Get(key string) (int, bool) {
-    s.mu.Lock()
-    defer s.mu.Unlock()
-    v, ok := s.m[key]
-    return v, ok
-}
-
-func (s *SafeMap) Set(key string, val int) {
-    s.mu.Lock()
-    defer s.mu.Unlock()
-    s.m[key] = val
-}
-
-func (s *SafeMap) Delete(key string) {
-    s.mu.Lock()
-    defer s.mu.Unlock()
-    delete(s.m, key)
-}
-
-func (s *SafeMap) Len() int {
-    s.mu.Lock()
-    defer s.mu.Unlock()
-    return len(s.m)
-}
-```
-
-### Fix 2 — RWMutex for read-heavy maps
-
-```go
-type SafeMap struct {
-    mu sync.RWMutex
-    m  map[string]int
-}
-
-func (s *SafeMap) Get(key string) (int, bool) {
-    s.mu.RLock()
-    defer s.mu.RUnlock()
-    v, ok := s.m[key]
-    return v, ok
-}
-
-func (s *SafeMap) Set(key string, val int) {
-    s.mu.Lock()
-    defer s.mu.Unlock()
-    s.m[key] = val
-}
-```
-
-### Fix 3 — sync.Map (specialised, not a drop-in)
-
-`sync.Map` is optimised for specific workloads, not a general-purpose concurrent map:
-
-```go
-var m sync.Map
-
-m.Store("key", "value")       // set
-v, ok := m.Load("key")        // get
-m.LoadOrStore("key", "other") // get or set if absent
-m.Delete("key")               // delete
-
-m.Range(func(k, v any) bool {
-    fmt.Println(k, v)         // iterate (no ordering guarantees)
-    return true               // false to stop iteration
-})
-```
-
-`sync.Map` is appropriate when:
-- Keys are written once and read many times (like a configuration cache)
-- Multiple goroutines access **disjoint keys** (no contention)
-- You need atomic load-or-store semantics
-
-For everything else, use `map + sync.Mutex` — it's simpler and faster at most workloads.
-
-> [!tip] Profile first. `sync.Map` is not faster than `map + Mutex` in general — it is faster only in the specific patterns it was designed for.
-
-### Slices also need protection
-
-```go
-var (
-    results []int
-    mu      sync.Mutex
-)
-
-// WRONG — concurrent append without lock
-for i := 0; i < 10; i++ {
-    go func(n int) {
-        results = append(results, n) // race!
-    }(i)
-}
-
-// RIGHT
-for i := 0; i < 10; i++ {
-    go func(n int) {
-        mu.Lock()
-        results = append(results, n)
-        mu.Unlock()
-    }(i)
-}
-```
-
-Appending to a slice might reallocate the backing array — two goroutines doing this concurrently can end up with one write being lost entirely.
-
-### Structs too
-
-```go
-type Counter struct {
-    mu    sync.Mutex
-    Value int
-}
-
-func (c *Counter) Inc() {
-    c.mu.Lock()
-    c.Value++
-    c.mu.Unlock()
-}
-
-func (c *Counter) Get() int {
-    c.mu.Lock()
-    defer c.mu.Unlock()
-    return c.Value
-}
-```
-
-### The rule
-
-> [!warning] Any mutable data shared between goroutines must be protected by a mutex, an atomic operation, or accessed exclusively through channels. If two goroutines can touch the same memory and at least one writes, synchronise or face a data race.
-
----
-
-## 13. sync/atomic — Lock-Free Operations for Simple Cases
-
-For simple counters and flags, `sync/atomic` provides **lock-free** operations that are faster than a mutex:
-
-### Atomic counter
-
-```go
-import "sync/atomic"
-
-var counter int64
-
-// Increment
-atomic.AddInt64(&counter, 1)
-
-// Read
-val := atomic.LoadInt64(&counter)
-
-// Write
-atomic.StoreInt64(&counter, 0)
-
-// Compare and swap (CAS) — set to new value only if current == old
-swapped := atomic.CompareAndSwapInt64(&counter, 42, 99)
-// swapped = true if counter was 42 and is now 99
-```
-
-### Complete example
-
-```go
-var counter int64
-
-func main() {
-    var wg sync.WaitGroup
-    for i := 0; i < 1000; i++ {
-        wg.Add(1)
-        go func() {
-            defer wg.Done()
-            atomic.AddInt64(&counter, 1)
-        }()
-    }
-    wg.Wait()
-    fmt.Println(atomic.LoadInt64(&counter)) // 1000 — no mutex needed
-}
-```
-
-### Available operations
-
-| Function | Purpose |
-|---|---|
-| `AddT(ptr, delta)` | Atomic increment/decrement (T = Int32, Int64, Uint32, Uint64) |
-| `LoadT(ptr)` | Atomic read |
-| `StoreT(ptr, val)` | Atomic write |
-| `SwapT(ptr, new)` | Atomic swap, returns old value |
-| `CompareAndSwapT(ptr, old, new)` | Atomic CAS, returns bool |
-| `AddUintptr`, `LoadPointer`, `StorePointer` | For pointer-sized values |
-
-### Atomic bool (using Int32)
-
-```go
-var flag int32
-
-func set()  { atomic.StoreInt32(&flag, 1) }
-func get() bool { return atomic.LoadInt32(&flag) == 1 }
-```
-
-Or use `atomic.Bool` (Go 1.19+):
-
-```go
-var flag atomic.Bool
-flag.Store(true)
-fmt.Println(flag.Load()) // true
-```
-
-### When to use atomics vs mutex
-
-- **Atomics** for: simple counters, flags, single-word values
-- **Mutex** for: complex data structures, multi-field structs, maps, slices, any state that involves multiple variables that must change together
-
-```go
-// Atomics: perfect for this
-var requests int64
-atomic.AddInt64(&requests, 1)
-
-// Mutex: needed here (multiple fields must stay consistent)
-type Account struct {
-    mu      sync.Mutex
-    balance int
-    owner   string
-}
-```
-
----
-
-## 14. sync.Once — One-Time Initialization
-
-`sync.Once` ensures a function is called exactly once, no matter how many goroutines call `Do`:
-
-```go
-var (
-    config  *Config
-    loadCfg sync.Once
-)
-
-func GetConfig() *Config {
-    loadCfg.Do(func() {
-        fmt.Println("loading config...")
-        config = loadConfig() // called exactly once
-    })
-    return config
-}
-
-// Multiple goroutines can call GetConfig safely:
-go GetConfig()
-go GetConfig()
-go GetConfig()
-// "loading config..." prints only once
-```
-
-### How it works
-
-The first goroutine to call `Do` runs the function. All subsequent calls (even concurrent ones) **block until the first finishes**, then return immediately without running the function again.
-
-```go
-var once sync.Once
-once.Do(func() { fmt.Println("once") })
-once.Do(func() { fmt.Println("once") }) // does nothing — already ran
-// Output: "once" (only once)
-```
-
-### Common uses
-
-- Lazy singleton initialisation
-- One-time setup (opening a DB connection pool, loading config)
-- Ensuring cleanup runs only once (e.g., closing a file descriptor)
-
-### Panic behavior
-
-If the function passed to `Do` panics, `sync.Once` considers it "done" — subsequent calls to `Do` will **not** retry:
-
-```go
-var once sync.Once
-once.Do(func() { panic("fail") }) // panic
-once.Do(func() { fmt.Println("retry?") }) // never runs — once considers it "done"
-```
-
-If you need retry-on-panic behavior, implement it yourself with a flag and a mutex.
-
----
-
-## 15. Goroutine Panics — What Happens and How to Handle Them
-
-### A panic in any goroutine crashes the entire program
+#### A panic in any goroutine crashes the entire program
 
 ```go
 func main() {
     go func() {
-        panic("boom!") // this panic kills the whole process
+        panic("boom!") // this kills the whole process
     }()
     time.Sleep(time.Second)
     fmt.Println("will this print?")
 }
-// Output:
 // panic: boom!
-// goroutine 5 [running]:
-// main.main.func1()
-//    main.go:6 +0x2a
 // exit status 2
 ```
 
 Panics are **not** per-goroutine. An unrecovered panic in any goroutine terminates the entire program. There is no "catch" in the parent goroutine.
 
-### Recover only works inside the panicking goroutine
+#### Recover only works inside the panicking goroutine
 
 ```go
 // RIGHT — recover in the same goroutine that panics
@@ -1434,7 +695,6 @@ go func() {
         }
     }()
     panic("boom!")
-    // recover catches this — other goroutines are unaffected
 }()
 
 // WRONG — recover in main does NOT catch panics from other goroutines
@@ -1448,7 +708,7 @@ go func() {
 }()
 ```
 
-### Always recover in goroutines that can panic
+#### Always recover in goroutines that can panic
 
 ```go
 go func() {
@@ -1457,21 +717,21 @@ go func() {
             log.Printf("goroutine panicked: %v", r)
         }
     }()
-    doRiskyWork() // if this panics, we catch it
+    doRiskyWork()
 }()
 ```
 
-This is especially important for long-running goroutines (like HTTP handlers, workers): a single panic should not take down the entire server.
+Essential for long-running goroutines (HTTP handlers, workers) — a single panic should not take down the entire server.
 
 ---
 
-## 16. Goroutine Leaks — How They Happen and How to Prevent Them
+### 12.2.4 Goroutine Leaks
 
-A **goroutine leak** is a goroutine that never exits. It sits in memory forever, holding resources — stack, heap references, open file descriptors, database connections.
+A **goroutine leak** is a goroutine that never exits. It sits in memory forever, holding stack, heap references, and resources.
 
-### Common causes
+#### Common causes
 
-#### 1. Blocked on an unbuffered channel send with no receiver
+**1. Blocked on an unbuffered channel send with no receiver**
 
 ```go
 func leak() {
@@ -1479,11 +739,10 @@ func leak() {
     go func() {
         ch <- 42 // blocks forever — no one receives
     }()
-    // goroutine never exits
 }
 ```
 
-#### 2. Blocked on a channel receive with no sender
+**2. Blocked on a channel receive with no sender**
 
 ```go
 func leak() {
@@ -1494,7 +753,7 @@ func leak() {
 }
 ```
 
-#### 3. Writer goroutine outlives the reader
+**3. Writer goroutine outlives the reader**
 
 ```go
 func process(items []string) {
@@ -1504,13 +763,12 @@ func process(items []string) {
             ch <- processItem(s) // blocks if nobody reads
         }(item)
     }
-    // read only first result, then return
-    result := <-ch
-    // remaining goroutines leak — they're blocked sending to ch
+    result := <-ch      // read only first result, then return
+    // remaining goroutines leak — blocked sending
 }
 ```
 
-#### 4. Infinite loop without a stop condition
+**4. Infinite loop without a stop condition**
 
 ```go
 go func() {
@@ -1520,84 +778,9 @@ go func() {
 }()
 ```
 
-#### 5. Blocked on a mutex that never unlocks
+#### How to prevent leaks
 
-```go
-var mu sync.Mutex
-mu.Lock()
-go func() {
-    mu.Lock() // blocks forever — main goroutine never unlocks
-}()
-// main never calls mu.Unlock()
-```
-
-### How to prevent leaks
-
-#### 1. Always have a cancellation path
-
-```go
-func worker(done <-chan bool) {
-    for {
-        select {
-        case <-done:
-            return // clean exit on signal
-        default:
-            doWork()
-        }
-    }
-}
-
-done := make(chan bool)
-go worker(done)
-
-// Later, signal shutdown
-close(done) // all goroutines reading from done will unblock
-```
-
-#### 2. Use buffered channels when the number of sends is known
-
-```go
-// If you know exactly how many values will be sent, buffer accordingly
-results := make(chan Result, len(items))
-
-for _, item := range items {
-    go func(s string) {
-        results <- processItem(s) // won't block — enough buffer space
-    }(item)
-}
-
-for i := 0; i < len(items); i++ {
-    result := <-results // read all results
-}
-```
-
-#### 3. Use `select` with timeout
-
-```go
-ch := make(chan int)
-go func() {
-    select {
-    case ch <- result:
-        fmt.Println("sent successfully")
-    case <-time.After(5 * time.Second):
-        fmt.Println("timeout — nobody received")
-    }
-}()
-```
-
-#### 4. Track lifecycle with WaitGroup
-
-```go
-var wg sync.WaitGroup
-wg.Add(1)
-go func() {
-    defer wg.Done()
-    work()
-}()
-wg.Wait() // proven: goroutine has exited
-```
-
-#### 5. Context-based cancellation
+**1. Context-based cancellation**
 
 ```go
 ctx, cancel := context.WithCancel(context.Background())
@@ -1614,13 +797,57 @@ go func() {
 cancel() // signal cancellation
 ```
 
-### Detecting leaks
+**2. Done channel pattern**
+
+```go
+done := make(chan struct{})
+go func() {
+    for {
+        select {
+        case <-done:
+            return
+        default:
+            doWork()
+        }
+    }
+}()
+close(done) // all goroutines reading done will unblock
+```
+
+**3. Buffered channels when send count is known**
+
+```go
+results := make(chan Result, len(items))
+for _, item := range items {
+    go func(s string) {
+        results <- processItem(s) // won't block — enough buffer
+    }(item)
+}
+for i := 0; i < len(items); i++ {
+    result := <-results // read all
+}
+```
+
+**4. `select` with timeout**
+
+```go
+ch := make(chan int)
+go func() {
+    select {
+    case ch <- result:
+    case <-time.After(5 * time.Second):
+        fmt.Println("timeout — nobody received")
+    }
+}()
+```
+
+#### Detecting leaks
 
 ```go
 func TestNoLeak(t *testing.T) {
     before := runtime.NumGoroutine()
     doWork()
-    time.Sleep(100 * time.Millisecond) // let goroutines settle
+    time.Sleep(100 * time.Millisecond)
     after := runtime.NumGoroutine()
     if after > before {
         t.Errorf("goroutine leak: %d → %d", before, after)
@@ -1628,30 +855,32 @@ func TestNoLeak(t *testing.T) {
 }
 ```
 
-Use `runtime.NumGoroutine()` as a health check. In production, expose it via a metrics endpoint. A steadily growing goroutine count is a red flag.
+Expose `runtime.NumGoroutine()` via a metrics endpoint in production. A steadily growing count is a red flag.
+
+> [!warning] Every goroutine needs a way to stop. Always have a cancellation path — context, done channel, or timeout.
 
 ---
 
-## 17. Goroutine Patterns
+## 12.3 Goroutines: Patterns & Reference
 
-### Pattern 1 — Fire and Forget
+### 12.3.1 Goroutine Patterns
 
-Launch a goroutine and don't wait for its result. The goroutine handles its own errors (usually by logging).
+#### Pattern 1 — Fire and Forget
+
+Launch a goroutine without waiting for its result. The goroutine handles its own errors.
 
 ```go
 go func() {
     if err := sendWelcomeEmail(user); err != nil {
-        log.Printf("failed to send welcome email to %s: %v", user.Email, err)
+        log.Printf("failed to send welcome email: %v", err)
     }
 }()
-// main continues immediately — email sends asynchronously
+// main continues immediately
 ```
 
-**Use when:** the caller doesn't need the result, and the goroutine can handle its own errors.
+**Use when:** the caller doesn't need the result. **Risk:** the goroutine can leak if it blocks.
 
-**Risk:** the goroutine can leak if it blocks. Ensure there's no hidden blocking path or unbounded channel.
-
-### Pattern 2 — Fan-Out (N goroutines, N results)
+#### Pattern 2 — Fan-Out (N goroutines, N results)
 
 Process N items with N goroutines, collect all results:
 
@@ -1680,11 +909,11 @@ func fanOut(items []int) []int {
 }
 ```
 
-**Use when:** items are independent, all results are needed, and you want maximum concurrency.
+**Use when:** items are independent, all results needed, max concurrency desired.
 
-### Pattern 3 — Worker Pool (limited concurrency)
+#### Pattern 3 — Worker Pool (limited concurrency)
 
-Limit the number of concurrently running goroutines to control resource usage:
+Limit concurrent goroutines to control resource usage:
 
 ```go
 func workerPool(jobs []Job, numWorkers int) []Result {
@@ -1692,63 +921,14 @@ func workerPool(jobs []Job, numWorkers int) []Result {
     resultCh := make(chan Result, len(jobs))
     var wg sync.WaitGroup
 
-    // Start fixed number of workers
     for i := 0; i < numWorkers; i++ {
         wg.Add(1)
         go func(id int) {
             defer wg.Done()
             for job := range jobCh {
-                log.Printf("worker %d processing job %d", id, job.ID)
                 resultCh <- process(job)
             }
         }(i)
-    }
-
-    // Send jobs
-    for _, job := range jobs {
-        jobCh <- job
-    }
-    close(jobCh) // signal workers: no more jobs
-
-    wg.Wait()      // wait for all workers to finish
-    close(resultCh)
-
-    var results []Result
-    for r := range resultCh {
-        results = append(results, r)
-    }
-    return results
-}
-```
-
-**Use when:** you have many items but want to limit concurrency (e.g., avoid overwhelming a database, API, or file system).
-
-**Choosing the pool size:**
-- CPU-bound work: `runtime.GOMAXPROCS(0)` workers
-- IO-bound work: experiment, typically 10-100× the CPU count
-
-### Pattern 4 — Worker Pool with error handling
-
-```go
-type Result struct {
-    Value int
-    Err   error
-}
-
-func workerPoolWithErrors(jobs []int, numWorkers int) []Result {
-    jobCh := make(chan int, len(jobs))
-    resultCh := make(chan Result, len(jobs))
-    var wg sync.WaitGroup
-
-    for i := 0; i < numWorkers; i++ {
-        wg.Add(1)
-        go func() {
-            defer wg.Done()
-            for job := range jobCh {
-                val, err := processWithError(job)
-                resultCh <- Result{Value: val, Err: err}
-            }
-        }()
     }
 
     for _, job := range jobs {
@@ -1767,9 +947,11 @@ func workerPoolWithErrors(jobs []int, numWorkers int) []Result {
 }
 ```
 
-### Pattern 5 — Pipeline (stages connected by channels)
+**Pool size:** CPU-bound → `runtime.GOMAXPROCS(0)`. IO-bound → experiment, typically 10-100× CPU count.
 
-Each stage of the pipeline runs in its own goroutine and communicates via channels:
+**Use when:** many items but want to limit concurrency (avoid overwhelming a DB, API, or filesystem).
+
+#### Pattern 4 — Pipeline (stages connected by channels)
 
 ```go
 func generate(nums ...int) <-chan int {
@@ -1794,30 +976,17 @@ func square(in <-chan int) <-chan int {
     return out
 }
 
-func triple(in <-chan int) <-chan int {
-    out := make(chan int)
-    go func() {
-        defer close(out)
-        for n := range in {
-            out <- n * 3
-        }
-    }()
-    return out
-}
-
 func main() {
-    // Pipeline: generate → square → triple → print
-    for result := range triple(square(generate(1, 2, 3, 4))) {
-        fmt.Println(result) // 3, 12, 27, 48
+    // Pipeline: generate → square → print
+    for result := range square(generate(1, 2, 3, 4)) {
+        fmt.Println(result) // 1, 4, 9, 16
     }
 }
 ```
 
-**Use when:** processing flows through clear stages where each stage does one transformation and the stages can run concurrently.
+**Use when:** processing flows through clear stages that can run concurrently.
 
-### Pattern 6 — Goroutine with timeout
-
-Use `select` to enforce a deadline on a goroutine's result:
+#### Pattern 5 — Goroutine with timeout
 
 ```go
 func fetchWithTimeout(url string, timeout time.Duration) ([]byte, error) {
@@ -1844,119 +1013,9 @@ func fetchWithTimeout(url string, timeout time.Duration) ([]byte, error) {
 }
 ```
 
-### Pattern 7 — Heartbeat
-
-Periodically report that a goroutine is still alive:
-
-```go
-func workerWithHeartbeat(done <-chan bool) <-chan bool {
-    heartbeat := make(chan bool, 1)
-
-    go func() {
-        defer close(heartbeat)
-        for {
-            select {
-            case <-done:
-                return
-            case heartbeat <- true:
-                // signal that we're alive
-            default:
-                // do work
-            }
-        }
-    }()
-
-    return heartbeat
-}
-
-func main() {
-    done := make(chan bool)
-    hb := workerWithHeartbeat(done)
-
-    for i := 0; i < 3; i++ {
-        select {
-        case <-hb:
-            fmt.Println("worker is alive")
-        case <-time.After(2 * time.Second):
-            fmt.Println("worker may be dead — no heartbeat")
-        }
-    }
-    close(done)
-}
-```
-
-### Pattern 8 — Retry with exponential backoff
-
-```go
-func retryWithBackoff(attempts int, fn func() error) error {
-    var err error
-    for i := 0; i < attempts; i++ {
-        if err = fn(); err == nil {
-            return nil
-        }
-        delay := time.Duration(math.Pow(2, float64(i))) * 100 * time.Millisecond
-        log.Printf("attempt %d failed: %v; retrying in %v", i+1, err, delay)
-        time.Sleep(delay)
-    }
-    return fmt.Errorf("all %d attempts failed: %w", attempts, err)
-}
-
-go retryWithBackoff(3, func() error {
-    return sendRequest()
-})
-```
-
-### Pattern 9 — Graceful worker shutdown
-
-Workers consume jobs until the job channel is closed and the queue is empty, then they exit cleanly:
-
-```go
-func startWorkers(num int, jobs <-chan Job, results chan<- Result) {
-    var wg sync.WaitGroup
-
-    for i := 0; i < num; i++ {
-        wg.Add(1)
-        go func(id int) {
-            defer wg.Done()
-            for job := range jobs {
-                log.Printf("worker %d processing job %d", id, job.ID)
-                results <- process(job)
-            }
-            log.Printf("worker %d shutting down", id)
-        }(i)
-    }
-
-    // Wait in a separate goroutine so the caller doesn't block
-    go func() {
-        wg.Wait()
-        close(results) // all workers done — close results channel
-    }()
-}
-
-func main() {
-    jobs := make(chan Job, 100)
-    results := make(chan Result, 100)
-
-    startWorkers(5, jobs, results)
-
-    // Send jobs
-    for i := 0; i < 100; i++ {
-        jobs <- Job{ID: i}
-    }
-    close(jobs) // signal: no more jobs
-
-    // Collect results
-    for res := range results {
-        fmt.Println(res)
-    }
-}
-```
-
 ---
 
-## 18. Goroutines Are Not Coroutines
-
-Despite the name, goroutines and coroutines are fundamentally different:
+### 12.3.2 Goroutines Are Not Coroutines
 
 | Aspect | Goroutine | Coroutine |
 |---|---|---|
@@ -1965,19 +1024,17 @@ Despite the name, goroutines and coroutines are fundamentally different:
 | **Concurrency** | Can run in parallel (GOMAXPROCS > 1) | Single-threaded cooperative |
 | **Yield points** | Blocking calls (I/O, channels, signals) | Explicit `yield` or `await` |
 | **Relationship** | Not hierarchical (no parent-child) | Often hierarchical (caller awaits callee) |
-| **Identity** | No identity, no handle | Has identity (e.g., Lua coroutine handle, Python generator) |
+| **Identity** | No identity, no handle | Has identity (e.g., Lua coroutine handle) |
 | **Resume** | Automatically by scheduler | Manually by caller |
 
-### Key difference in practice
-
 ```go
-// Goroutine — you start it and forget it
+// Goroutine — start it and forget it
 go func() {
-    data := <-ch     // runtime yields here if no data available
+    data := <-ch       // runtime yields here if no data
     result := process(data)
-    ch2 <- result    // runtime yields here until receiver is ready
+    ch2 <- result      // runtime yields here until receiver ready
 }()
-// The scheduler decides when to run/resume this goroutine
+// Scheduler decides when to run/resume
 
 // Coroutine (conceptual — Lua/Python style)
 co = create_coroutine(func() {
@@ -1985,28 +1042,26 @@ co = create_coroutine(func() {
     result = process(data)
     send(ch2, result)  // yields explicitly
 })
-resume(co) // I, the caller, decide when to resume
+resume(co) // I decide when to resume
 ```
 
-Goroutines let you write **sequential code** that is automatically concurrent. You don't mark yield points; the runtime finds them. This is why Go concurrency is often described as "easy" — you write normal functions and just prefix them with `go`.
+Goroutines let you write **sequential code** that is automatically concurrent. You don't mark yield points; the runtime finds them.
 
 > [!info] Goroutines are closer to **green threads** (lightweight, preemptively scheduled, independent stacks) than to **coroutines** (cooperative, stackless, hierarchical). The name "goroutine" was chosen deliberately to avoid this confusion.
 
 ---
 
-## 19. Debugging Goroutines
+### 12.3.3 Debugging Goroutines
 
-### Getting a goroutine dump
-
-Send `SIGQUIT` to a running Go program on Unix:
+#### Goroutine dump via SIGQUIT
 
 ```bash
 kill -QUIT <pid>
 ```
 
-The program prints a stack trace of **all goroutines** and exits. This is invaluable for debugging deadlocks and leaks.
+Prints a stack trace of **all goroutines** and exits. Invaluable for deadlocks and leaks.
 
-```text
+```
 goroutine 1 [running]:
 main.main()
     /home/user/main.go:10 +0x39
@@ -2016,64 +1071,56 @@ main.worker()
     /home/user/main.go:22 +0x4f
 created by main.main in goroutine 1
     /home/user/main.go:15 +0x3a
-...
 ```
 
-### Programmatic stack dump
+#### Programmatic stack dump
 
 ```go
 import "runtime/pprof"
 
-func dumpGoroutines() {
-    buf := make([]byte, 64*1024)
-    n := runtime.Stack(buf, true) // true = all goroutines
-    fmt.Println(string(buf[:n]))
-}
+buf := make([]byte, 64*1024)
+n := runtime.Stack(buf, true) // true = all goroutines
+fmt.Println(string(buf[:n]))
 ```
 
-### runtime.NumGoroutine()
+#### runtime.NumGoroutine()
 
 ```go
 fmt.Println("number of goroutines:", runtime.NumGoroutine())
 ```
 
-Use this in health checks to detect leaks.
+Use in health checks to detect leaks.
 
-### pprof — profiling goroutines
+#### pprof
 
 ```go
 import (
     "net/http"
-    _ "net/http/pprof" // registers /debug/pprof/ handler
+    _ "net/http/pprof"
 )
 
-func main() {
-    go func() {
-        log.Println(http.ListenAndServe("localhost:6060", nil))
-    }()
-    // ... your app
-}
+go func() {
+    log.Println(http.ListenAndServe("localhost:6060", nil))
+}()
 ```
 
-Then visit `http://localhost:6060/debug/pprof/goroutine` to see all goroutines with their stack traces.
+Visit `http://localhost:6060/debug/pprof/goroutine` to see all goroutines with stack traces.
 
-### GOTRACEBACK environment variable
-
-Controls the amount of output on a crash:
+#### GOTRACEBACK
 
 ```bash
-GOTRACEBACK=none    # just the panic message, no stacks
-GOTRACEBACK=single  # stack of the crashing goroutine only (default)
+GOTRACEBACK=none    # just panic message
+GOTRACEBACK=single  # stack of crashing goroutine only (default)
 GOTRACEBACK=all     # stacks of all goroutines
-GOTRACEBACK=system  # stacks of all goroutines + runtime frames
-GOTRACEBACK=crash   # same as system, but also calls SIGABRT (creates coredump)
+GOTRACEBACK=system  # all goroutines + runtime frames
+GOTRACEBACK=crash   # same as system + SIGABRT (coredump)
 ```
 
 ---
 
-## 20. Goroutines and the net/http Server
+### 12.3.4 Goroutines and the net/http Server
 
-The `net/http` server uses goroutines implicitly — **each HTTP request runs in its own goroutine**:
+The `net/http` server runs **each HTTP request in its own goroutine**:
 
 ```go
 func main() {
@@ -2083,20 +1130,16 @@ func main() {
 
 func handler(w http.ResponseWriter, r *http.Request) {
     // This runs in a NEW goroutine for each request
-    fmt.Fprintf(w, "Hello from goroutine %d", goroutineID())
+    fmt.Fprintf(w, "Hello!")
 }
 ```
 
-### Why this matters
+Multiple requests are handled **concurrently** without writing any `go` statements. If one handler blocks, others are unaffected.
 
-- Multiple requests are handled **concurrently** without you writing any `go` statements
-- Each handler is a new goroutine — if one blocks, others are unaffected
-- You get concurrent request handling for free
-
-### The implication for shared state
+#### The implication for shared state
 
 ```go
-var counter int // shared state — not protected!
+var counter int // shared — not protected!
 
 func handler(w http.ResponseWriter, r *http.Request) {
     counter++ // DATA RACE — multiple goroutines modify this concurrently
@@ -2104,74 +1147,38 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-Always protect shared state in HTTP handlers with mutexes.
+Always protect shared state in HTTP handlers with mutexes. See [[14 - Sync Primitives]].
 
 ---
 
-## 21. Quick Reference Cheatsheet
+### 12.3.5 Quick Reference Cheatsheet
 
 ```go
-// ── Starting a goroutine ────────────────────────────────────
+// ── Starting a goroutine ───────────────────────────
 go myFunction()
 go func() { fmt.Println("hi") }()
 
-// ── WaitGroup ───────────────────────────────────────────────
-var wg sync.WaitGroup
-wg.Add(1)          // before goroutine
-go func() {
-    defer wg.Done() // in defer
-    // ...
-}()
-wg.Wait()
-
-// ── WaitGroup with known count ──────────────────────────────
-n := 10
-wg.Add(n)
-for i := 0; i < n; i++ {
-    go func(id int) {
-        defer wg.Done()
-        work(id)
-    }(i)
-}
-wg.Wait()
-
-// ── Loop capture bug fix (pre-Go 1.22) ─────────────────────
+// ── Loop capture bug fix (pre-Go 1.22) ────────────
 for i := 0; i < 3; i++ {
     i := i // shadow
     go func() { fmt.Println(i) }()
 }
 
-// ── Mutex ───────────────────────────────────────────────────
-var mu sync.Mutex
-mu.Lock()
-// critical section
-mu.Unlock()
+// ── Pass parameter instead of capture ────────────
+for i := 0; i < 3; i++ {
+    go func(id int) { fmt.Println(id) }(i)
+}
 
-// Idiomatic:
-mu.Lock()
-defer mu.Unlock()
+// ── GOMAXPROCS ─────────────────────────────────────
+runtime.GOMAXPROCS(0)  // get
+runtime.GOMAXPROCS(8)  // set (rarely needed)
 
-// ── RWMutex ─────────────────────────────────────────────────
-var rwmu sync.RWMutex
-rwmu.RLock()       // multiple readers allowed
-rwmu.RUnlock()
-rwmu.Lock()        // exclusive writer
-rwmu.Unlock()
+// ── Runtime checks ────────────────────────────────
+runtime.NumGoroutine() // count
+runtime.Gosched()      // yield
+runtime.Goexit()       // exit current goroutine (defers run)
 
-// ── Atomic counter (sync/atomic) ────────────────────────────
-var counter int64
-atomic.AddInt64(&counter, 1)
-val := atomic.LoadInt64(&counter)
-
-// ── Race detection ──────────────────────────────────────────
-// go run -race main.go
-// go test -race ./...
-
-// ── sync.Once (one-time init) ───────────────────────────────
-var once sync.Once
-once.Do(func() { initOnce() })
-
-// ── Recover from goroutine panic ────────────────────────────
+// ── Recover from goroutine panic ──────────────────
 go func() {
     defer func() {
         if r := recover(); r != nil {
@@ -2181,8 +1188,8 @@ go func() {
     riskyWork()
 }()
 
-// ── Goroutine leak prevention: done channel ─────────────────
-done := make(chan bool)
+// ── Goroutine leak prevention: done channel ───────
+done := make(chan struct{})
 go func() {
     for {
         select {
@@ -2195,50 +1202,21 @@ go func() {
 }()
 close(done)
 
-// ── Worker pool ─────────────────────────────────────────────
-jobs := make(chan Job, 100)
-results := make(chan Result, 100)
-
-for i := 0; i < 5; i++ {
-    wg.Add(1)
-    go func() {
-        defer wg.Done()
-        for job := range jobs {
-            results <- process(job)
-        }
-    }()
-}
-close(jobs)
-wg.Wait()
-close(results)
-
-// ── GOMAXPROCS ──────────────────────────────────────────────
-runtime.GOMAXPROCS(0)  // get
-runtime.GOMAXPROCS(8)  // set (rarely needed)
-
-// ── Runtime checks ─────────────────────────────────────────
-runtime.NumGoroutine() // count
-runtime.Gosched()      // yield
-runtime.Goexit()       // exit current goroutine (defers run)
-
-// ── Goroutine dump ──────────────────────────────────────────
+// ── Goroutine dump ─────────────────────────────────
 // kill -QUIT <pid>
 // OR:
 pprof.Lookup("goroutine").WriteTo(os.Stdout, 1)
 
-// ── GOTRACEBACK ─────────────────────────────────────────────
+// ── GOTRACEBACK ────────────────────────────────────
 // GOTRACEBACK=all ./myapp  → stacks of all goroutines on crash
 
-// ── Rules ───────────────────────────────────────────────────
-// ✅ Always Add before go
-// ✅ Always defer Done / Unlock / RUnlock
-// ✅ Always use -race during development
-// ✅ Never copy a sync.Mutex / RWMutex / WaitGroup
-// ✅ Never let main() exit while goroutines run
+// ── Rules ──────────────────────────────────────────
 // ✅ Every goroutine needs a way to stop
+// ✅ Always use -race during development
+// ✅ Never let main() exit while goroutines run
 // ✅ Protect all shared mutable data
-// ❌ Never access a map concurrently without synchronization
-// ❌ Never use panic for expected errors (even in goroutines)
+// ❌ Never access a map concurrently without sync
+// ❌ Never use panic for expected errors
 // ❌ Never assume goroutines finish before main exits
 // ❌ Never ignore the race detector output
 ```
