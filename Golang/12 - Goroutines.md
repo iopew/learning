@@ -330,7 +330,7 @@ P2 queue: []  ← empty!
 
 P2 steals from P1:
 P1 queue: [G1, G2, G3]
-P2 queue: [G4, G5, G6]
+P2 queue: [G4, G5, G6].
 ```
 
 #### Cooperative preemption
