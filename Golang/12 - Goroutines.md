@@ -345,7 +345,7 @@ go func() {
 }()
 ```
 
-Go 1.14+ uses **asynchronous preemption** — the runtime sends a signal (SIGURG) to interrupt long-running goroutines even if they never yield. Very tight loops (ns/iteration) can still delay scheduling briefly.
+	Go 1.14+ uses **asynchronous preemption** — the runtime sends a signal (SIGURG) to interrupt long-running goroutines even if they never yield. Very tight loops (ns/iteration) can still delay scheduling briefly.
 
 #### GOMAXPROCS
 
