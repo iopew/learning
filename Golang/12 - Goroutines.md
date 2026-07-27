@@ -20,10 +20,11 @@
   - [[#12.2.4 Goroutine Leaks]]
 - [[#12.3 Goroutines: Patterns & Reference]]
   - [[#12.3.1 Goroutine Patterns]]
-  - [[#12.3.2 Goroutines Are Not Coroutines]]
-  - [[#12.3.3 Debugging Goroutines]]
-  - [[#12.3.4 Goroutines and the net/http Server]]
-  - [[#12.3.5 Quick Reference Cheatsheet]]
+  - [[#12.3.2 The select Statement]]
+  - [[#12.3.3 Goroutines Are Not Coroutines]]
+  - [[#12.3.4 Debugging Goroutines]]
+  - [[#12.3.5 Goroutines and the net/http Server]]
+  - [[#12.3.6 Quick Reference Cheatsheet]]
 
 ---
 
@@ -1015,7 +1016,78 @@ func fetchWithTimeout(url string, timeout time.Duration) ([]byte, error) {
 
 ---
 
-### 12.3.2 Goroutines Are Not Coroutines
+### 12.3.2 The select Statement
+
+`select` lets a goroutine wait on **multiple channel operations at once** — it blocks until one of them can proceed.
+
+```go
+select {
+case msg := <-ch1:
+    fmt.Println("got from ch1:", msg)
+case msg := <-ch2:
+    fmt.Println("got from ch2:", msg)
+}
+```
+
+Whichever channel has data ready first wins, that case runs, `select` exits. If both are ready, it picks randomly.
+
+#### Non-blocking send/receive with default
+
+```go
+select {
+case ch <- value:
+    fmt.Println("sent")
+default:
+    fmt.Println("nobody receiving, skipped")
+}
+```
+
+The `default` case fires immediately if no other case can proceed — no blocking.
+
+#### Timeout
+
+```go
+select {
+case result := <-ch:
+    fmt.Println(result)
+case <-time.After(2 * time.Second):
+    fmt.Println("timeout")
+}
+```
+
+If `ch` doesn't deliver within 2 seconds, the timeout case fires. The goroutine doesn't leak — it moves on.
+
+#### Done channel — graceful shutdown
+
+```go
+for {
+    select {
+    case job := <-jobCh:
+        process(job)
+    case <-done:
+        return
+    }
+}
+```
+
+This goroutine processes jobs until someone closes `done`. Without `select`, you'd be stuck on `<-jobCh` with no way to shut down.
+
+#### Empty select blocks forever
+
+```go
+select {} // blocks forever — useful in toy programs to keep main alive
+```
+
+#### Rules
+
+- `select` picks one ready case at random if multiple are ready
+- If no case is ready, it blocks (unless there's a `default`)
+- A `nil` channel in a `select` case is never ready — the case is ignored
+- `close()` on a channel makes receives from it unblock immediately (zero value + ok=false)
+
+---
+
+### 12.3.3 Goroutines Are Not Coroutines
 
 | Aspect | Goroutine | Coroutine |
 |---|---|---|
@@ -1051,7 +1123,7 @@ Goroutines let you write **sequential code** that is automatically concurrent. Y
 
 ---
 
-### 12.3.3 Debugging Goroutines
+### 12.3.4 Debugging Goroutines
 
 #### Goroutine dump via SIGQUIT
 
@@ -1118,7 +1190,7 @@ GOTRACEBACK=crash   # same as system + SIGABRT (coredump)
 
 ---
 
-### 12.3.4 Goroutines and the net/http Server
+### 12.3.5 Goroutines and the net/http Server
 
 The `net/http` server runs **each HTTP request in its own goroutine**:
 
@@ -1151,7 +1223,7 @@ Always protect shared state in HTTP handlers with mutexes. See [[14 - Sync Primi
 
 ---
 
-### 12.3.5 Quick Reference Cheatsheet
+### 12.3.6 Quick Reference Cheatsheet
 
 ```go
 // ── Starting a goroutine ───────────────────────────
