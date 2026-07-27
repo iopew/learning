@@ -8,23 +8,23 @@
 
 - [[#1. What is a Goroutine?]]
 - [[#2. The go Keyword — Starting a Goroutine]]
-- [[#12.1 Goroutines: Fundamentals]]
-  - [[#12.1.1 Goroutines vs OS Threads]]
-  - [[#12.1.2 Goroutine Scheduling — The M:N Scheduler]]
-  - [[#12.1.3 Goroutine Stack — Starts Small, Grows Dynamically]]
-  - [[#12.1.4 Goroutine Lifecycle]]
-- [[#12.2 Goroutines: Safety & Leaks]]
-  - [[#12.2.1 Closures and the Loop Capture Bug]]
-  - [[#12.2.2 Data Races and the Race Detector]]
-  - [[#12.2.3 Goroutine Panics]]
-  - [[#12.2.4 Goroutine Leaks]]
-- [[#12.3 Goroutines: Patterns & Reference]]
-  - [[#12.3.1 Goroutine Patterns]]
-  - [[#12.3.2 The select Statement]]
-  - [[#12.3.3 Goroutines Are Not Coroutines]]
-  - [[#12.3.4 Debugging Goroutines]]
-  - [[#12.3.5 Goroutines and the net/http Server]]
-  - [[#12.3.6 Quick Reference Cheatsheet]]
+- [[#3. Goroutines: Fundamentals]]
+  - [[#3.1 Goroutines vs OS Threads]]
+  - [[#3.2 Goroutine Scheduling — The M:N Scheduler]]
+  - [[#3.3 Goroutine Stack — Starts Small, Grows Dynamically]]
+  - [[#3.4 Goroutine Lifecycle]]
+- [[#4. Goroutines: Safety & Leaks]]
+  - [[#4.1 Closures and the Loop Capture Bug]]
+  - [[#4.2 Data Races and the Race Detector]]
+  - [[#4.3 Goroutine Panics]]
+  - [[#4.4 Goroutine Leaks]]
+- [[#5. Goroutines: Patterns & Reference]]
+  - [[#5.1 Goroutine Patterns]]
+  - [[#5.2 The select Statement]]
+  - [[#5.3 Goroutines Are Not Coroutines]]
+  - [[#5.4 Debugging Goroutines]]
+  - [[#5.5 Goroutines and the net/http Server]]
+  - [[#5.6 Quick Reference Cheatsheet]]
 
 ---
 
@@ -244,9 +244,9 @@ go func(id int) {
 
 ---
 
-## 12.1 Goroutines: Fundamentals
+## 3 Goroutines: Fundamentals
 
-### 12.1.1 Goroutines vs OS Threads
+### 3.1 Goroutines vs OS Threads
 
 | Aspect | Goroutine | OS Thread |
 |---|---|---|
@@ -274,7 +274,7 @@ The OS sees only a handful of threads (typically `GOMAXPROCS` threads running us
 
 ---
 
-### 12.1.2 Goroutine Scheduling — The M:N Scheduler
+### 3.2 Goroutine Scheduling — The M:N Scheduler
 
 Go implements an **M:N scheduling** model: **M** goroutines are multiplexed onto **N** OS threads.
 
@@ -384,7 +384,7 @@ Controls the number of OS threads executing user-level Go code simultaneously. D
 
 ---
 
-### 12.1.3 Goroutine Stack — Starts Small, Grows Dynamically
+### 3.3 Goroutine Stack — Starts Small, Grows Dynamically
 
 Each goroutine starts with ~4 KB of stack, growing and shrinking as needed — unlike OS threads with a fixed 1 MB+ stack.
 
@@ -430,7 +430,7 @@ func infiniteRecursion() {
 
 ---
 
-### 12.1.4 Goroutine Lifecycle
+### 3.4 Goroutine Lifecycle
 
 #### The main goroutine
 
@@ -493,9 +493,9 @@ go worker()
 
 ---
 
-## 12.2 Goroutines: Safety & Leaks
+## 4 Goroutines: Safety & Leaks
 
-### 12.2.1 Closures and the Loop Capture Bug
+### 4.1 Closures and the Loop Capture Bug
 
 When a goroutine closure captures a loop variable, it captures the **variable itself** (the memory location), not the value at the time the goroutine was created.
 
@@ -574,7 +574,7 @@ The `i := i` idiom is harmless in 1.22+ and makes code safe to backport. Many te
 
 ---
 
-### 12.2.2 Data Races and the Race Detector
+### 4.2 Data Races and the Race Detector
 
 A **data race** occurs when two or more goroutines access the same memory concurrently, and at least one access is a write.
 
@@ -667,7 +667,7 @@ The report tells you: the operation (read/write), the line, which goroutines wer
 
 ---
 
-### 12.2.3 Goroutine Panics
+### 4.3 Goroutine Panics
 
 #### A panic in any goroutine crashes the entire program
 
@@ -726,7 +726,7 @@ Essential for long-running goroutines (HTTP handlers, workers) — a single pani
 
 ---
 
-### 12.2.4 Goroutine Leaks
+### 4.4 Goroutine Leaks
 
 A **goroutine leak** is a goroutine that never exits. It sits in memory forever, holding stack, heap references, and resources.
 
@@ -862,9 +862,9 @@ Expose `runtime.NumGoroutine()` via a metrics endpoint in production. A steadily
 
 ---
 
-## 12.3 Goroutines: Patterns & Reference
+## 5 Goroutines: Patterns & Reference
 
-### 12.3.1 Goroutine Patterns
+### 5.1 Goroutine Patterns
 
 #### Pattern 1 — Fire and Forget
 
@@ -1016,7 +1016,7 @@ func fetchWithTimeout(url string, timeout time.Duration) ([]byte, error) {
 
 ---
 
-### 12.3.2 The select Statement
+### 5.2 The select Statement
 
 `select` lets a goroutine wait on **multiple channel operations at once** — it blocks until one of them can proceed.
 
@@ -1087,7 +1087,7 @@ select {} // blocks forever — useful in toy programs to keep main alive
 
 ---
 
-### 12.3.3 Goroutines Are Not Coroutines
+### 5.3 Goroutines Are Not Coroutines
 
 | Aspect | Goroutine | Coroutine |
 |---|---|---|
@@ -1123,7 +1123,7 @@ Goroutines let you write **sequential code** that is automatically concurrent. Y
 
 ---
 
-### 12.3.4 Debugging Goroutines
+### 5.4 Debugging Goroutines
 
 #### Goroutine dump via SIGQUIT
 
@@ -1190,7 +1190,7 @@ GOTRACEBACK=crash   # same as system + SIGABRT (coredump)
 
 ---
 
-### 12.3.5 Goroutines and the net/http Server
+### 5.5 Goroutines and the net/http Server
 
 The `net/http` server runs **each HTTP request in its own goroutine**:
 
@@ -1223,7 +1223,7 @@ Always protect shared state in HTTP handlers with mutexes. See [[14 - Sync Primi
 
 ---
 
-### 12.3.6 Quick Reference Cheatsheet
+### 5.6 Quick Reference Cheatsheet
 
 ```go
 // ── Starting a goroutine ───────────────────────────
