@@ -204,13 +204,25 @@ Go/
 │     (make(chan T, n)), send (<-) and receive (->),
 │     closing a channel (close()), receiving from closed
 │     channel (zero value + ok=false), range over channel,
-│     channel direction (chan<- T, <-chan T), select statement
-│     (all variants), channel patterns (done channel,
+│     channel direction (chan<- T, <-chan T), select basics
+│     (deep dive in [[14 - Select]]), channel patterns (done channel,
 │     pipeline, fan-out, fan-in, semaphore, timeout),
 │     deadlocks (what causes them), nil channel behavior
 │     (blocks forever), channel ownership (who creates, who closes)
 │
-├── 14 - Sync Primitives.md
+├── 14 - Select.md
+│     What select is (waiting on multiple channel ops, runs
+│     first ready case), blocking until a case is ready,
+│     random selection when multiple cases ready (fairness
+│     guarantee, starvation prevention), default (non-blocking
+│     send/receive), for + select (event loop pattern),
+│     done channel (cancellation broadcast, graceful shutdown),
+│     timeout (time.After, time.NewTimer), ticker, fan-in
+│     (multiplexing many channels into one), nil channels
+│     (self-disabling cases), select {} (block forever),
+│     gotchas (time.After leaks, closed channel spin, busy loops)
+│
+├── 15 - Sync Primitives.md
 │     sync.WaitGroup (Add/Done/Wait, Add before go, never copy,
 │     negative counter panic), sync.Mutex (Lock/Unlock, defer
 │     pattern, not reentrant, never copy, TryLock),
@@ -221,7 +233,7 @@ Go/
 │     CompareAndSwap, atomic.Bool), safe sharing patterns
 │     (maps, slices, structs with mutex), race detector usage
 │
-├── 15 - Generics.md                       (partial in Functions)
+├── 16 - Generics.md                       (partial in Functions)
 │     Full deep dive: type parameters syntax, constraints
 │     (any, comparable, cmp.Ordered, union |, underlying ~,
 │     method requirements, combining), multiple type params,
@@ -233,7 +245,7 @@ Go/
 │     performance (monomorphization), limitations (no generic
 │     methods, no runtime type creation)
 │
-├── 16 - Packages & Modules.md
+├── 17 - Packages & Modules.md
 │     Package basics (package declaration, main vs library),
 │     import paths, visibility (exported vs unexported),
 │     init() order across packages, go.mod (module path,
@@ -244,7 +256,7 @@ Go/
 │     packages), build constraints (//go:build), workspaces
 │     (go.work for multi-module development)
 │
-├── 17 - Standard Library.md
+├── 18 - Standard Library.md
 │     fmt (Printf verbs: %v %+v %#v %T %d %s %q %f %e %b,
 │     Println vs Printf vs Sprintf vs Fprintf, Errorf),
 │     os (Args, Exit, Getenv, Setenv, ReadFile, WriteFile,
@@ -262,7 +274,7 @@ Go/
 │     log (Print, Fatal, Panic, SetFlags, SetPrefix,
 │     log/slog for structured logging)
 │
-├── 18 - net/http.md
+├── 19 - net/http.md
 │     HTTP server (ListenAndServe, ServeMux, Handle,
 │     HandleFunc), handlers and HandlerFunc, request
 │     (Method, URL, Header, Body, Form, Context),
@@ -276,7 +288,7 @@ Go/
 │     TLS/HTTPS, timeouts (server + client), context
 │     cancellation in handlers, testing HTTP handlers
 │
-├── 19 - encoding/json.md
+├── 20 - encoding/json.md
 │     json.Marshal, json.Unmarshal, struct tags (json:"name",
 │     omitempty, -, string option), json.Encoder/Decoder
 │     (streaming — for HTTP bodies), working with unknown
@@ -287,7 +299,7 @@ Go/
 │     (unexported fields silently ignored, interface{}
 │     number as float64)
 │
-├── 20 - File I/O.md
+├── 21 - File I/O.md
 │     os.Open vs os.Create vs os.OpenFile (flags: O_RDONLY,
 │     O_WRONLY, O_RDWR, O_CREATE, O_TRUNC, O_APPEND),
 │     reading (io.ReadAll, bufio.Scanner line by line,
@@ -303,7 +315,7 @@ Go/
 │     os.MkdirTemp), embed package (//go:embed for
 │     embedding files into binary)
 │
-├── 21 - Testing.md
+├── 22 - Testing.md
 │     testing package basics (func TestXxx(t *testing.T)),
 │     t.Error vs t.Fatal vs t.Log, running tests (go test,
 │     -v, -run, -count), table-driven tests ([]struct pattern),
@@ -320,7 +332,7 @@ Go/
 │     implementation, avoid global state, test files
 │     end in _test.go)
 │
-├── 22 - CLI Tools.md
+├── 23 - CLI Tools.md
 │     os.Args (raw argument access), flag package
 │     (flag.String, flag.Int, flag.Bool, flag.Parse,
 │     flag.Args, custom usage message), subcommands pattern
@@ -331,7 +343,7 @@ Go/
 │     building and distributing (go build -o, GOOS/GOARCH
 │     for cross-compilation, ldflags for version injection)
 │
-├── 23 - Context.md
+├── 24 - Context.md
 │     What context is and why it exists (cancellation,
 │     deadlines, values propagation), context.Background(),
 │     context.TODO(), context.WithCancel (cancel function,
@@ -345,7 +357,7 @@ Go/
 │     patterns, common mistakes (storing context in structs,
 │     using context.Background() everywhere, wrong key types)
 │
-├── 24 - Reflection.md
+├── 25 - Reflection.md
 │     reflect package (reflect.TypeOf, reflect.ValueOf),
 │     Kind vs Type, inspecting struct fields and tags
 │     (reflect.Type.Field, StructTag.Get), modifying values
@@ -358,7 +370,7 @@ Go/
 │     performance cost of reflection, why to avoid it
 │     in hot paths, alternatives (generics, code generation)
 │
-└── 25 - Patterns & Idioms.md
+└── 26 - Patterns & Idioms.md
       Worker pool pattern (goroutines + channels + WaitGroup),
       pipeline pattern (stages connected by channels),
       fan-out / fan-in, done channel pattern (cancellation),
@@ -440,18 +452,19 @@ Go/
 ├── 11 - Error Handling.md            ✅ DONE
 ├── 12 - Goroutines.md                ← NEXT
 ├── 13 - Channels.md
-├── 14 - Sync Primitives.md
-├── 15 - Generics.md
-├── 16 - Packages & Modules.md
-├── 17 - Standard Library.md
-├── 18 - net/http.md
-├── 19 - encoding/json.md
-├── 20 - File I/O.md
-├── 21 - Testing.md
-├── 22 - CLI Tools.md
-├── 23 - Context.md
-├── 24 - Reflection.md
-└── 25 - Patterns & Idioms.md
+├── 14 - Select.md
+├── 15 - Sync Primitives.md
+├── 16 - Generics.md
+├── 17 - Packages & Modules.md
+├── 18 - Standard Library.md
+├── 19 - net/http.md
+├── 20 - encoding/json.md
+├── 21 - File I/O.md
+├── 22 - Testing.md
+├── 23 - CLI Tools.md
+├── 24 - Context.md
+├── 25 - Reflection.md
+└── 26 - Patterns & Idioms.md
 ```
 
 ---
@@ -470,31 +483,33 @@ When I say "let's explore topic X", create a **full, detailed Obsidian note** co
 
 **12 - Goroutines.md** 3 sub-sections: **12.1 Fundamentals** (what, go keyword, vs OS threads, M:N scheduler, stack, lifecycle), **12.2 Safety & Leaks** (loop capture bug, data races & race detector, panics, leaks), **12.3 Patterns & Reference** (core patterns: fire-and-forget, fan-out, worker pool, pipeline, timeout; vs coroutines, debugging, net/http, cheatsheet)
 
-**13 - Channels.md** What a channel is, `make(chan T)`, unbuffered vs buffered channels, send and receive, closing a channel, receiving from closed channel, `range` over channel, channel direction (`chan<- T`, `<-chan T`), `select` statement deep dive, channel patterns (done channel, pipeline, fan-out, fan-in, semaphore, timeout), deadlocks, nil channel behavior, channel vs mutex, channel ownership
+**13 - Channels.md** What a channel is, `make(chan T)`, unbuffered vs buffered channels, send and receive, closing a channel, receiving from closed channel, `range` over channel, channel direction (`chan<- T`, `<-chan T`), select basics (deep dive in 14 - Select), channel patterns (done channel, pipeline, fan-out, fan-in, semaphore, timeout), deadlocks, nil channel behavior, channel vs mutex, channel ownership
 
-**14 - Sync Primitives.md** `sync.WaitGroup` (Add/Done/Wait, Add before go, never copy), `sync.Mutex` (Lock/Unlock, defer, not reentrant, never copy, TryLock), `sync.RWMutex` (RLock/RUnlock, writer starvation), `sync.Once` (one-time init, panic behavior), `sync.Map` (when to use vs map+mutex), `sync/atomic` (Add, Load, Store, CAS, atomic.Bool), safe sharing patterns (maps, slices, structs with mutex), race detector
+**14 - Select.md** What select is (waiting on multiple channel ops, runs first ready case), blocking until a case is ready, random selection when multiple cases ready (fairness guarantee, starvation prevention), `default` (non-blocking send/receive), `for { select }` event loop, done channel (cancellation broadcast), timeout (`time.After`, `time.NewTimer`), ticker, fan-in (multiplexing many channels into one), nil channels (self-disabling cases), `select {}` (block forever), gotchas (time.After leaks, closed channel spin, busy loops)
 
-**15 - Generics.md** Full deep dive beyond what's in Functions note: generic types (structs + methods), generic interfaces, constraints package, real-world generic utilities (Map, Filter, Reduce, Contains, Keys, Values), when to use generics vs interfaces vs any, performance, limitations
+**15 - Sync Primitives.md** `sync.WaitGroup` (Add/Done/Wait, Add before go, never copy), `sync.Mutex` (Lock/Unlock, defer, not reentrant, never copy, TryLock), `sync.RWMutex` (RLock/RUnlock, writer starvation), `sync.Once` (one-time init, panic behavior), `sync.Map` (when to use vs map+mutex), `sync/atomic` (Add, Load, Store, CAS, atomic.Bool), safe sharing patterns (maps, slices, structs with mutex), race detector
 
-**16 - Packages & Modules.md** Package basics, import paths, visibility, `init()` order across packages, `go.mod`, `go.sum`, `go get`, `go mod tidy`, `go mod vendor`, semantic versioning, internal packages, blank imports, dot imports, package naming conventions, organizing code, build constraints, workspaces
+**16 - Generics.md** Full deep dive beyond what's in Functions note: generic types (structs + methods), generic interfaces, constraints package, real-world generic utilities (Map, Filter, Reduce, Contains, Keys, Values), when to use generics vs interfaces vs any, performance, limitations
 
-**17 - Standard Library.md** `fmt` (all verbs), `os`, `io`, `bufio`, `strings` (full reference), `strconv`, `math`, `sort`, `time`, `log`
+**17 - Packages & Modules.md** Package basics, import paths, visibility, `init()` order across packages, `go.mod`, `go.sum`, `go get`, `go mod tidy`, `go mod vendor`, semantic versioning, internal packages, blank imports, dot imports, package naming conventions, organizing code, build constraints, workspaces
 
-**18 - net/http.md** HTTP server, ServeMux, handlers, request/response, middleware, routing, HTTP client, JSON APIs, cookies, TLS, timeouts, context cancellation, testing HTTP handlers
+**18 - Standard Library.md** `fmt` (all verbs), `os`, `io`, `bufio`, `strings` (full reference), `strconv`, `math`, `sort`, `time`, `log`
 
-**19 - encoding/json.md** `json.Marshal`, `json.Unmarshal`, struct tags, `json.Encoder`/`Decoder`, `map[string]any`, `json.RawMessage`, custom marshaling, null vs missing fields, `json.Number`, common mistakes
+**19 - net/http.md** HTTP server, ServeMux, handlers, request/response, middleware, routing, HTTP client, JSON APIs, cookies, TLS, timeouts, context cancellation, testing HTTP handlers
 
-**20 - File I/O.md** `os.Open`, `os.Create`, `os.OpenFile`, reading/writing patterns, `defer f.Close()`, `filepath` package, directory traversal, temp files, `embed` package
+**20 - encoding/json.md** `json.Marshal`, `json.Unmarshal`, struct tags, `json.Encoder`/`Decoder`, `map[string]any`, `json.RawMessage`, custom marshaling, null vs missing fields, `json.Number`, common mistakes
 
-**21 - Testing.md** `testing` package, table-driven tests, subtests, benchmarks, examples, test helpers, coverage, mocking, `httptest`, fuzzing, best practices
+**21 - File I/O.md** `os.Open`, `os.Create`, `os.OpenFile`, reading/writing patterns, `defer f.Close()`, `filepath` package, directory traversal, temp files, `embed` package
 
-**22 - CLI Tools.md** `os.Args`, `flag` package, subcommands, environment variables, reading stdin, exit codes, cobra library, building and distributing
+**22 - Testing.md** `testing` package, table-driven tests, subtests, benchmarks, examples, test helpers, coverage, mocking, `httptest`, fuzzing, best practices
 
-**23 - Context.md** What context is, `context.Background()`, `context.TODO()`, `WithCancel`, `WithTimeout`, `WithDeadline`, `WithValue`, passing context as first parameter, `ctx.Err()`, context in HTTP handlers, common mistakes
+**23 - CLI Tools.md** `os.Args`, `flag` package, subcommands, environment variables, reading stdin, exit codes, cobra library, building and distributing
 
-**24 - Reflection.md** `reflect` package, Kind vs Type, struct fields and tags, modifying values, calling methods, `reflect.DeepEqual`, creating values dynamically, when to use reflection, performance cost, alternatives
+**24 - Context.md** What context is, `context.Background()`, `context.TODO()`, `WithCancel`, `WithTimeout`, `WithDeadline`, `WithValue`, passing context as first parameter, `ctx.Err()`, context in HTTP handlers, common mistakes
 
-**25 - Patterns & Idioms.md** Worker pool, pipeline, fan-out/fan-in, done channel, semaphore, functional options, builder, singleton, options struct, table-driven design, error wrapping conventions, `io.Reader`/`io.Writer` composition, interface segregation, dependency injection, embed, go:generate
+**25 - Reflection.md** `reflect` package, Kind vs Type, struct fields and tags, modifying values, calling methods, `reflect.DeepEqual`, creating values dynamically, when to use reflection, performance cost, alternatives
+
+**26 - Patterns & Idioms.md** Worker pool, pipeline, fan-out/fan-in, done channel, semaphore, functional options, builder, singleton, options struct, table-driven design, error wrapping conventions, `io.Reader`/`io.Writer` composition, interface segregation, dependency injection, embed, go:generate
 
 ---
 
@@ -585,4 +600,4 @@ You are teaching me Go (Golang). Follow these rules precisely:
 - User says they don't understand — Explain more simply with fresh examples.
 
 ### Curriculum state
-Topics 1-11 are complete. Current focus: concurrency (Goroutines 12 → Channels 13 → Sync Primitives 14 → rest).
+Topics 1-11 are complete. Current focus: concurrency (Goroutines 12 → Channels 13 → Select 14 → Sync Primitives 15 → rest).

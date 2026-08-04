@@ -462,7 +462,7 @@ go func() {
 wg.Wait() // blocks until Done is called
 ```
 
-> [!warning] `wg.Add` must be called **before** the goroutine starts, not inside it. See [[14 - Sync Primitives]] for full `WaitGroup` coverage.
+> [!warning] `wg.Add` must be called **before** the goroutine starts, not inside it. See [[15 - Sync Primitives]] for full `WaitGroup` coverage.
 
 #### A goroutine's natural end
 
@@ -1219,7 +1219,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-Always protect shared state in HTTP handlers with mutexes. See [[14 - Sync Primitives]].
+Always protect shared state in HTTP handlers with mutexes. See [[15 - Sync Primitives]].
 
 ---
 
