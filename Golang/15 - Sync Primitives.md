@@ -25,11 +25,11 @@
 
 Channels and locks solve **different** problems:
 
-| | Channel | Mutex / atomic |
-|---|---|---|
-| Problem | **Pass data** between goroutines | **Protect shared data** from goroutines |
-| Mental model | mail slot / pipe | lock on a room |
-| Typical use | producer → consumer, pipelines | many goroutines updating one counter/map |
+|              | Channel                          | Mutex / atomic                           |
+| ------------ | -------------------------------- | ---------------------------------------- |
+| Problem      | **Pass data** between goroutines | **Protect shared data** from goroutines  |
+| Mental model | mail slot / pipe                 | lock on a room                           |
+| Typical use  | producer → consumer, pipelines   | many goroutines updating one counter/map |
 
 > [!info] **Go proverb:** "Don't communicate by sharing memory; share memory by communicating." Channels move the data around so it's never shared. When you *must* share (one map, one counter, one config), sync primitives make the sharing safe.
 
