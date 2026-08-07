@@ -23,7 +23,7 @@
 
 ## 1. What are Sync Primitives?
 
-Channels and locks solve **different** problems:
+	Channels and locks solve **different** problems:
 
 |              | Channel                          | Mutex / atomic                           |
 | ------------ | -------------------------------- | ---------------------------------------- |
