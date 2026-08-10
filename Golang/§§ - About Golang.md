@@ -423,12 +423,42 @@ I am learning **Go (Golang)** from scratch, building a comprehensive Obsidian no
 
 Every Obsidian note follows this structure:
 
-- Frontmatter with tags and series info
-- Full table of contents with `[[#Section]]` wikilinks
-- Obsidian callout blocks (`> [!warning]`, `> [!tip]`, `> [!info]`)
-- Code blocks with `go` syntax highlighting
-- Series navigation links at the bottom (`Previous: [[...]] · Next: [[...]]`)
-- A Quick Reference Cheatsheet as the last section before the nav links
+- File name: `NN - Topic.md` (zero-padded number, e.g. `04 - Functions.md`)
+- `# Go — Topic` H1 (NOT frontmatter-YAML; the metadata is a blockquote on line 3: `> **Series:** Go Language Fundamentals **Tags:** #go #golang #... **Level:** Beginner → Intermediate`)
+- `## Table of Contents` with `[[#Section]]` wikilinks
+- Sections numbered `## 1.`, `## 2.`, ... (subsections `### 1.1`)
+- Obsidian callout blocks: `> [!note]`, `> [!warning]`, `> [!tip]`, `> [!info]`, `> [!practice]` — practice callouts end each meaningful section
+- Code blocks with `go` syntax highlighting — examples are complete/runnable when relevant (func main included)
+- Cross-reference other notes as wikilinks with link text: `[[04 - Functions]] §12`
+- Cheatsheet is the SECOND-TO-LAST section (`## N. Quick Reference Cheatsheet`)
+- Last line: navigation `_Previous: [[x]] · Next: [[y]]_`
+- Follow-ups/gotchas are mirrored in About.md (descriptor + tree entry), and marked `✅ DONE` / `← NEXT` in the tree above
+
+---
+
+### How the Assistant Works in This Project
+
+When a new session starts, the user pastes a session summary. The assistant should:
+
+1. Read this file (`§§ - About Golang.md`) — it is the source of truth for conventions, curriculum, and state. No questions about note style or topic order; follow conventions directly.
+2. **Answer questions in chat FIRST.** Explanations happen in the chat conversation, teaching style:
+   - Examples before theory, minimal jargon, short blocks matching the vault notes
+   - Mental models/analogies (mail slot vs lock on a room, published snapshot vs draft, etc.)
+   - When the user says "I don't understand" — re-explain from zero with a concrete tiny example, then ask WHERE it breaks (which step)
+3. **Write to the vault ONLY when asked** ("create the topic", "update the note").
+4. When creating a topic note: follow the descriptor in "What Each Note Should Cover" below, the style above, and the existing `NN - Topic.md` notes as templates (same callouts, depth, structure). After creating: update the tree marker (`✅ DONE`/`← NEXT`) and note any new facts in "Current State" below.
+5. Code demos live as `.go` files next to the notes (`interfaces_demo/`, `100k_goroutines.go`). Run `go run -race` to verify before presenting. Small one-off snippets go in chat only, unless the user asks for a demo file.
+6. Verify cross-links after creating a note (Previous/Next navigation both directions).
+
+### Current State
+
+- Topics **01–16 done** (16 - Generics.md created Aug 2026). Next: **17 - Packages & Modules.md**.
+- Note 15 sync/atomic section expanded with per-operation detail (Load/Store/Add/Swap/CAS + choosing rule) — modern state of §8.
+- Pending follow-ups, confirmed with user:
+  - `sync_vs_rwmutex` demo (8 readers : 1 writer, timing both variants) — proposed, user chose explanation instead. Re-ask before building.
+  - User's personal counter project (outside vault): rewriting `mu.Lock` + print-per-iteration to worker pool (8 workers) + atomic + single print after `wg.Wait()`. Final code never confirmed — re-check when user brings it up.
+  - Optional: Anki card batch for completed topics on request (min 25-30 cards, see "Anki Card Style" below).
+- Curriculum numbering fixed through 26; NO renumbering needed when adding topics.
 
 ---
 
@@ -450,11 +480,11 @@ Go/
 ├── 09 - Structs & Methods.md         ✅ DONE
 ├── 10 - Interfaces.md                ✅ DONE
 ├── 11 - Error Handling.md            ✅ DONE
-├── 12 - Goroutines.md                ← NEXT
-├── 13 - Channels.md
-├── 14 - Select.md
-├── 15 - Sync Primitives.md
-├── 16 - Generics.md
+├── 12 - Goroutines.md                ✅ DONE
+├── 13 - Channels.md                  ✅ DONE
+├── 14 - Select.md                    ✅ DONE
+├── 15 - Sync Primitives.md           ✅ DONE
+├── 16 - Generics.md                  ← NEXT
 ├── 17 - Packages & Modules.md
 ├── 18 - Standard Library.md
 ├── 19 - net/http.md

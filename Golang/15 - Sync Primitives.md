@@ -254,15 +254,64 @@ If you're not sure you need it — you don't. Use `map + Mutex` (or RWMutex) and
 
 **Lock-free** operations on single words (int64, uintptr, pointers, bool). Atomic ops have no lock and no blocking — hardware-level instructions.
 
-```go
-var counter uint64
+Why it matters: `counter++` is three steps (load, add, store) and races; `atomic.AddUint64` is **one step** — safe, no mutex, no contention.
 
-n := atomic.AddUint64(&counter, 1)   // increment, get the new value
-atomic.StoreUint64(&counter, 0)      // write
-v := atomic.LoadUint64(&counter)     // read
+The full toolkit — **six operations**, for every type (`atomic.Int32`, `atomic.Uint64`, `atomic.Bool`, `atomic.Pointer[T]`, ...):
+
+| Operation | What it does | When to use |
+|---|---|---|
+| `Load` | safe read | read a shared number (monitoring, status checks) |
+| `Store` | safe write + publish | reset counters, flip flags, publish a pointer |
+| `Add` | read + modify + write in one step | counters, metrics, order numbers |
+| `Swap` | unconditional set; returns the OLD value | "take whatever was there, put mine in" |
+| `CompareAndSwap` | set **only if** it matches; else report failure | claim exactly once (booking, slots) |
+| CAS loop (№ 9) | read → compute → CAS → retry | read-modify-write logic under contention |
+
+**8.1 `Load` — safe read.** Reads the current value, guaranteed no torn read.
+
+```go
+v := atomic.LoadUint64(&counter)
 ```
 
-Why it matters: `counter++` is three steps (load, add, store) and races; `atomic.AddUint64` is **one step** — safe, no mutex, no contention.
+Why not just read `counter` directly: a concurrent `Store`/`Add` may be mid-write, and plain reads of 64-bit values are not guaranteed atomic on all architectures — a reader could see a half-written value. `Load` is the portable, guaranteed version.
+
+**8.2 `Store` — safe write.** Writes a value, indivisibly.
+
+```go
+atomic.StoreUint64(&counter, 0)   // reset
+ready.Store(true)                 // flip flag
+```
+
+Why it matters beyond atomics: `Store` also carries the **memory-ordering guarantee** — *anything written BEFORE the `Store` is visible to any goroutine that `Load`s the value afterwards*. That contract is what makes snapshot patterns correct: fill in the struct, then `Store` the pointer; readers who `Load` it are guaranteed a fully-filled struct. Plain assignment gives no such guarantee.
+
+**8.3 `Add` — read + modify + write in one step.** Increment/decrement, atomically; returns the new value.
+
+```go
+n := atomic.AddUint64(&counter, 1)    // += 1
+atomic.AddUint64(&counter, ^uint64(4)) // -= 5 (two's complement; use Int64 types to avoid this)
+```
+
+Why: the alternative (`n = n + 1`) is three steps and loses updates; `Add` is the one-step version — the only operation with a dedicated CPU instruction (`LOCK XADD` on x86).
+
+**8.4 `Swap` — unconditional set; returns what WAS there.** Sets the new value atomically and hands you the previous one.
+
+```go
+old := atomic.SwapUint64(&seats[3], 1)
+// old == 0 → it was free, now it's yours
+// old == 1 → it was already booked
+```
+
+When: superseded one-value state — "take whatever the current value is, put mine in". Leader election (`old := Swap(&leader, myID)`; `old == 0` → you won), clearing slots, resetting rate-limiter buckets. Read-then-write from separate statements would race; `Swap` fuses both into one step.
+
+**8.5 `CompareAndSwap` — set only if it matches.** Check-and-set as ONE step; no other goroutine can slip between the check and the set.
+
+```go
+ok := atomic.CompareAndSwapUint64(&seats[3], 0, 1)
+// ok == true  → was 0, now 1, and YOUR step changed it
+// ok == false → someone else already won
+```
+
+When: "claim exactly once" — seat booking, one-time initialization, slot reservation. Why: `if x == 0 { x = 1 }` is two steps, and two goroutines can both pass the check and double-book. CAS fuses check + claim into one indivisible step → exactly one winner, no mutex.
 
 **`atomic.Bool`** (Go 1.19+) — the ergonomic flag:
 
@@ -286,7 +335,9 @@ current.Store(&Config{Timeout: 5 * time.Second})
 cfg := current.Load()
 ```
 
-Readers get a consistent snapshot with zero locking — the config pointer is swapped atomically. This is how production servers hot-reload configs without a mutex on the read path.
+Readers get a consistent snapshot with zero blocking — the config pointer is swapped atomically. A reader sees either the old or the new menu, **never a mix** ("espresso from new, croissant from old"). This is how production servers hot-reload configs without a mutex on the read path — and the exact principle inside `sync.Map` (section 7).
+
+> [!tip] **Choosing (one question).** "Is my operation ONE variable, ONE step?" → atomic. "Multiple variables or multiple steps must be atomic together" → Mutex. Atomic can never express a bank transfer of two balances.
 
 > [!practice] **Practice: the downloader's counter.** In the worker-pool download task you wrote `atomic.AddUint64(&globalCounter, 1)` for unique filenames. Re-run it with `-race` — it stays clean. Then swap it back to a plain `counter++` and watch `-race` scream. Atomic vs racy in one edit.
 
