@@ -5,7 +5,7 @@
 ## Scope (locked by discussion)
 
 - Web app, server-rendered, stdlib `net/http` + `html/template`, Go 1.22+ routing, no JS, no framework
-- Groceries only. One theme, no categories (decision: categorisation redundant — it's all food)
+- Groceries only. No categories (decision: categorisation redundant — it's all food)
 - Money = whole integer so'm (`int64`). No tiyin, no floats ever
 - QR: upload image → decode → **prefill form only, never auto-save**
 - Storage: SQLite (`modernc.org/sqlite`, pure Go, no cgo) behind a `Store` interface
@@ -32,4 +32,4 @@
 ## Folder maps
 
 - App: `~/Documents/Developer/expense-tracker/`
-- Notes: `~/Documents/Learning/Expense-tracker/`
+- Notes: `~/Documents/Learning/Expense-tracker/` (this folder, alongside Golang vault)
