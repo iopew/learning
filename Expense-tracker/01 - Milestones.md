@@ -15,8 +15,8 @@ Each milestone = one git commit (at least). Rules: SQL lives only in `internal/s
 
 - [x] `git init` own repo in `~/Documents/Developer/expense-tracker/`
 - [x] Notes folder created alongside Golang vault
-- [ ] `go get modernc.org/sqlite`
-- [ ] `internal/model/model.go` — Expense struct (id, amount int64, description, date, source)
-- [ ] `internal/store/store.go` — Open/Add/List/Summary (the only SQL)
-- [ ] throwaway `cmd/prove/main.go` — calls Add, List, prints; delete after
+- [x] `go get modernc.org/sqlite`
+- [x] `internal/model/model.go` — Expense struct (id, amount int64, description, date, source)
+- [x] `internal/store/store.go` — Open/Add done; List + Summary pending (the only SQL)
+- [ ] throwaway `cmd/prove/main.go` — calls Add ✓ (3 groceries inserted), List next
 - [ ] `go run` proves it → commit
