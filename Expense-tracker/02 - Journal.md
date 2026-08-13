@@ -15,3 +15,12 @@
 - built: model.Expense, store.Open (handle + CREATE TABLE), store.Add (INSERT with holes, returns id)
 - prove program inserts 3 groceries; SELECT proves rows live in prove.db
 - still to write: List, Summary → then first commit
+
+## 2026-08-12 — Store complete + first commit
+
+- List: Query returns a cursor (bookmark), 5-move dance learned (Query → guard → defer Close → Next/Scan/append → rows.Err)
+- WHERE BETWEEN = the librarian: filtering happens inside the database, never in Go
+- typo saga: `descriptionm`, then `descriptio` — same column, three strikes; guards caught it, but the real lesson: ALWAYS print `err` ("failed to get the list: no such column: ...")
+- Summary: QueryRow one-shot; sql.NullInt64 boxes (SUM/MAX are NULL on empty months, COUNT never) — the Valid-lid check
+- full loop proven: Add 3 → List chronological → Summary {3, 180000, 150000}
+- milestone 1 committed (own .gitignore for prove.db)
