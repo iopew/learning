@@ -452,7 +452,7 @@ When a new session starts, the user pastes a session summary. The assistant shou
 
 ### Current State
 
-- Topics **01–16 done** (16 - Generics.md created Aug 2026). Next: **17 - Packages & Modules.md**.
+- Topics **01–17 done** (17 - Packages & Modules.md created Aug 2026). Next: **18 - Standard Library.md**.
 - Note 15 sync/atomic section expanded with per-operation detail (Load/Store/Add/Swap/CAS + choosing rule) — modern state of §8.
 - Pending follow-ups, confirmed with user:
   - `sync_vs_rwmutex` demo (8 readers : 1 writer, timing both variants) — proposed, user chose explanation instead. Re-ask before building.
@@ -484,8 +484,8 @@ Go/
 ├── 13 - Channels.md                  ✅ DONE
 ├── 14 - Select.md                    ✅ DONE
 ├── 15 - Sync Primitives.md           ✅ DONE
-├── 16 - Generics.md                  ← NEXT
-├── 17 - Packages & Modules.md
+├── 16 - Generics.md                  ✅ DONE
+├── 17 - Packages & Modules.md        ← NEXT
 ├── 18 - Standard Library.md
 ├── 19 - net/http.md
 ├── 20 - encoding/json.md
