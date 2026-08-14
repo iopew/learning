@@ -2,8 +2,8 @@
 
 | # | Milestone | Status |
 |---|---|---|
-| 1 | DB days: go.mod ✓, schema, `store.Add/List/Summary`, throwaway proof main | **IN PROGRESS** |
-| 2 | Server skeleton: list page renders, add form round-trips | ⬜ |
+| 1 | DB days: go.mod ✓, schema, `store.Add/List/Summary`, throwaway proof main | ✅ DONE + committed |
+| 2 | Server skeleton: list page renders, add form round-trips | **IN PROGRESS** (hello server ✓, template/handlers/wiring next) |
 | 3 | Filters (range on both pages) + summary page | ⬜ |
 | 4 | QR upload → prefill | ⬜ |
 | 5 | Polish: flash errors, formatting, README, sample QR in testdata | ⬜ |

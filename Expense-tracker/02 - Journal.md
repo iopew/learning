@@ -24,3 +24,12 @@
 - Summary: QueryRow one-shot; sql.NullInt64 boxes (SUM/MAX are NULL on empty months, COUNT never) — the Valid-lid check
 - full loop proven: Add 3 → List chronological → Summary {3, 180000, 150000}
 - milestone 1 committed (own .gitignore for prove.db)
+
+## 2026-08-12 — Milestone 2 started
+
+- concepts: mux = reception desk (dispatcher, longest-prefix, method patterns "GET /hello"); middleware = on-the-way checks (auth/logging) — milestone 6; handler = func(w, r); factory pattern = closures handing the store to handlers
+- bug party: `http.HandleFunc` registers on the DEFAULT mux, not your `mux` → served mux was empty → 404 everywhere. Fix: `mux.HandleFunc("GET /hello", Greet)`
+- `/` 404ing is CORRECT: only registered routes exist
+- hello server works: curl localhost:8080/hello → "hello from the tracker"
+- next: web/templates/list.html + internal/web/handlers.go (ListPage/AddExpense factories) + wire cmd/expense/main.go (expense.db)
+- git: prove.db + .DS_Store untracked, staged for removal — commit pending
