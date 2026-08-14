@@ -213,11 +213,11 @@ Now `Sum` works on `[]int`, `[]float64`, and any custom named type like `type Ce
 
 **Two kinds of interface element, two purposes:**
 
-| Interface element | Restricts |
-|---|---|
-| Methods: `String() string` | Values must implement the methods (runtime dispatch) |
-| Type set: `~int \| ~string` | Values must be one of the listed types (compile-time) |
-| Both: `{ ~int; String() string }` | Must be an int-based type AND implement the methods |
+| Interface element                 | Restricts                                             |
+| --------------------------------- | ----------------------------------------------------- |
+| Methods: `String() string`        | Values must implement the methods (runtime dispatch)  |
+| Type set: `~int \| ~string`       | Values must be one of the listed types (compile-time) |
+| Both: `{ ~int; String() string }` | Must be an int-based type AND implement the methods   |
 
 **Type-set interfaces are ordinary values too:**
 
