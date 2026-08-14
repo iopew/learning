@@ -56,7 +56,7 @@ Go's community convention for a project with several executables: put them each 
 ```
 expense-tracker/
 ├── cmd/
-│   ├── prose/       ← delete me, this should say prove/
+│   ├── prove/       ← the throwaway experiment
 │   └── expense/     ← the real app: package main
 ├── internal/
 │   ├── model/       ← library packages
@@ -144,7 +144,7 @@ func init() {
 
 `go mod init <path>` creates the file that makes a folder a **module** — the unit Go builds and versions. Your project's, first lines:
 
-```text
+```go
 module expense-tracker
 
 go 1.26.3
@@ -155,15 +155,15 @@ go 1.26.3
 
 As you add dependencies, `go get` appends **requirement lines**:
 
-```text
-require modernc.org/sqlite v1.46.0
+```go
+require modernc.org/sqlite v1.56.0
 ```
 
 - **`require`** — the dependency manifest with exact versions
 
 **`replace` and `exclude`** sit alongside — the escape hatches:
 
-```text
+```go
 replace old => new v1.2.3      // use THIS module instead of the published one
 exclude bad v1.4.0             // pretend a broken version doesn't exist
 ```
@@ -178,9 +178,9 @@ exclude bad v1.4.0             // pretend a broken version doesn't exist
 
 Every time you `go get` a dependency, Go records its **cryptographic hashes** in `go.sum`:
 
-```text
-modernc.org/sqlite v1.46.0 h1:kVGh5Zr0TrKdiA7ignhlF7v...
-modernc.org/sqlite v1.46.0/go.mod h1:SWZR0oLk6DnN...
+```go
+modernc.org/sqlite v1.56.0 h1:kVGh5Zr0TrKdiA7ignhlF7v...
+modernc.org/sqlite v1.56.0/go.mod h1:SWZR0oLk6DnN...
 ```
 
 Its job: **verification.** On later builds, Go re-hashes what's in the module cache and compares. If bytes changed (an attacker, a corrupt cache, a truncated download), the build fails loudly rather than silently running tampered code.
@@ -225,7 +225,7 @@ Rules Go enforces:
 - **Major versions are separate paths**: `example.com/foo/v2` is a *different module* than `example.com/foo` — because v2 breaks compatibility, it must not collide
 - **`v0.x` and pre-1.0** versions make no compatibility promises — this is where most young modules live (no guarantee of stability)
 
-> [!note] The driver you installed is `v1.56.0`, node hidden under `modernc.org/libc`, `modernc.org/memory` etc. — the transitive dependency tree, exactly what go.sum records.
+> [!note] The driver you installed is `v1.56.0`, now hidden under `modernc.org/libc`, `modernc.org/memory` etc. — the transitive dependency tree, exactly what go.sum records.
 
 ---
 
@@ -362,7 +362,7 @@ The most common form is automatic: filename suffixes `_linux`, `_darwin`, `_amd6
 
 A **workspace** (`go.work` file at a common root) groups several modules for local development — e.g. when you're developing module A and module B that depends on it, both on disk:
 
-```text
+```go
 go 1.26
 
 use (
@@ -377,7 +377,7 @@ Everything in the workspace builds from source, ignoring version pins — the co
 
 ## 17. Quick Reference Cheatsheet
 
-```text
+```go
 # Module lifecycle
 go mod init <path>          # start a module (go.mod)
 go get <module>@<version>   # add/update a dependency

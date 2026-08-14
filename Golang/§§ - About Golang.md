@@ -452,7 +452,7 @@ When a new session starts, the user pastes a session summary. The assistant shou
 
 ### Current State
 
-- Topics **01–17 done** (17 - Packages & Modules.md created Aug 2026). Next: **18 - Standard Library.md**.
+- Topics **01–18 done** (18 - Standard Library.md created Aug 2026). Next: **19 - net/http.md**.
 - Note 15 sync/atomic section expanded with per-operation detail (Load/Store/Add/Swap/CAS + choosing rule) — modern state of §8.
 - Pending follow-ups, confirmed with user:
   - `sync_vs_rwmutex` demo (8 readers : 1 writer, timing both variants) — proposed, user chose explanation instead. Re-ask before building.
@@ -485,8 +485,8 @@ Go/
 ├── 14 - Select.md                    ✅ DONE
 ├── 15 - Sync Primitives.md           ✅ DONE
 ├── 16 - Generics.md                  ✅ DONE
-├── 17 - Packages & Modules.md        ← NEXT
-├── 18 - Standard Library.md
+├── 17 - Packages & Modules.md        ✅ DONE
+├── 18 - Standard Library.md          ← NEXT
 ├── 19 - net/http.md
 ├── 20 - encoding/json.md
 ├── 21 - File I/O.md
@@ -630,4 +630,4 @@ You are teaching me Go (Golang). Follow these rules precisely:
 - User says they don't understand — Explain more simply with fresh examples.
 
 ### Curriculum state
-Topics 1-11 are complete. Current focus: concurrency (Goroutines 12 → Channels 13 → Select 14 → Sync Primitives 15 → rest).
+Topics 1-18 are complete. Current focus: 19 - net/http (server, mux, handlers, middleware, client) next, then 20 - encoding/json.
