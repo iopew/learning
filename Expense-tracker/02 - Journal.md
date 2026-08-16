@@ -33,3 +33,14 @@
 - hello server works: curl localhost:8080/hello → "hello from the tracker"
 - next: web/templates/list.html + internal/web/handlers.go (ListPage/AddExpense factories) + wire cmd/expense/main.go (expense.db)
 - git: prove.db + .DS_Store untracked, staged for removal — commit pending
+
+## 2026-08-16 — Milestone 2 complete
+
+- full round-trip: form → POST /expenses/add → AddExpense → st.Add → 303 redirect → GET /expenses → ListPage → template render → table in browser
+- factory pattern made real: ListPage/AddExpense are closures that capture `st`
+- bug party: phantom `"structs"` import (autocomplete hallucination — `struct` is a keyword, not a package); route `GET /expense/add` vs form's `POST /expenses/add` (method + spelling mismatch — compiler can't see strings)
+- redirect: 303 + Location = "the page you see is always served by a GET" — F5-protection proven live
+- `log.Fatal(http.ListenAndServe(...))`: arguments evaluate BEFORE the call → Fatal runs only when the server dies; requests are served inside the argument slot
+- AddExpense five-fix round: bit-size 64 (was 4), early returns, `_, err =`, err in prints, the redirect itself
+- static files: `file://` browser reads disk itself; `http://` it can only request — handlers are the delivery truck (CSS deferred to milestone 5)
+- proven in expense.db: 2 rows (bread 10000, eggs 38000), both `manual`

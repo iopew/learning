@@ -3,10 +3,10 @@
 | # | Milestone | Status |
 |---|---|---|
 | 1 | DB days: go.mod ✓, schema, `store.Add/List/Summary`, throwaway proof main | ✅ DONE + committed |
-| 2 | Server skeleton: list page renders, add form round-trips | **IN PROGRESS** (hello server ✓, template/handlers/wiring next) |
+| 2 | Server skeleton: list page renders, add form round-trips | ✅ DONE — commit pending |
 | 3 | Filters (range on both pages) + summary page | ⬜ |
 | 4 | QR upload → prefill | ⬜ |
-| 5 | Polish: flash errors, formatting, README, sample QR in testdata | ⬜ |
+| 5 | Polish: CSS via `http.FileServer` (`web/static/`), flash errors, formatting, README, sample QR in testdata | ⬜ |
 | 6 | Auth: users table, bcrypt, session cookie, middleware, CSRF | ⬜ |
 
 Each milestone = one git commit (at least). Rules: SQL lives only in `internal/store/`; every mutation ends in a redirect; auth is milestone 6.
@@ -22,3 +22,13 @@ Each milestone = one git commit (at least). Rules: SQL lives only in `internal/s
 - [x] first `git commit` of milestone 1
 - [ ] (cleanup) prove main may be kept until milestone 2 replaces it
 - [ ] `go run` proves it → commit
+
+## Milestone 2 checklist (server skeleton)
+
+- [x] `web/templates/list.html` — table + add form (my first HTML)
+- [x] `internal/web/handlers.go` — ListPage + AddExpense factories (closure handing `st` to handlers)
+- [x] `cmd/expense/main.go` wiring — `store.Open` + guard, both routes, `log.Fatal(ListenAndServe)`
+- [x] round-trip proven in browser: added bread + eggs, rows land in `expense.db`
+- [x] 303 redirect + F5-protection verified (refresh re-GETs, no duplicates)
+- [x] deferred to milestone 5: CSS + static files (`FileServer` + `web/static/`)
+- [ ] commit milestone 2 (includes the staged `prove.db`/`.DS_Store` untracking)
