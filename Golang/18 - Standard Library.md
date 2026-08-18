@@ -199,15 +199,15 @@ The toolbelt. ([[07 - Strings & Runes]] covers string internals and UTF-8; this 
 
 **Searching & testing:**
 
-| Function | Job | Example |
-|---|---|---|
-| `Contains(s, sub)` | substring present? | `Contains("bread", "re")` → true |
-| `ContainsAny(s, "aeiou")` | any of these chars? | → true |
-| `HasPrefix` / `HasSuffix` | starts / ends with | `HasPrefix("expense", "exp")` → true |
-| `Index(s, sub)` | first position (−1 if absent) | `Index("bread", "a")` → 3 |
-| `LastIndex(s, sub)` | last position | — |
-| `Count(s, sub)` | occurrences (non-overlapping) | `Count("banana", "na")` → 2 |
-| `EqualFold(a, b)` | case-insensitive equality | `EqualFold("Go", "go")` → true |
+| Function                  | Job                           | Example                              |
+| ------------------------- | ----------------------------- | ------------------------------------ |
+| `Contains(s, sub)`        | substring present?            | `Contains("bread", "re")` → true     |
+| `ContainsAny(s, "aeiou")` | any of these chars?           | → true                               |
+| `HasPrefix` / `HasSuffix` | starts / ends with            | `HasPrefix("expense", "exp")` → true |
+| `Index(s, sub)`           | first position (−1 if absent) | `Index("bread", "a")` → 3            |
+| `LastIndex(s, sub)`       | last position                 | —                                    |
+| `Count(s, sub)`           | occurrences (non-overlapping) | `Count("banana", "na")` → 2          |
+| `EqualFold(a, b)`         | case-insensitive equality     | `EqualFold("Go", "go")` → true       |
 
 **Splitting & joining:**
 
