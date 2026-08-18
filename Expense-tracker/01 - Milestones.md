@@ -3,7 +3,7 @@
 | # | Milestone | Status |
 |---|---|---|
 | 1 | DB days: go.mod ✓, schema, `store.Add/List/Summary`, throwaway proof main | ✅ DONE + committed |
-| 2 | Server skeleton: list page renders, add form round-trips | ✅ DONE — commit pending |
+| 2 | Server skeleton: list page renders, add form round-trips | ✅ DONE + committed |
 | 3 | Filters (range on both pages) + summary page | ⬜ |
 | 4 | QR upload → prefill | ⬜ |
 | 5 | Polish: CSS via `http.FileServer` (`web/static/`), flash errors, formatting, README, sample QR in testdata | ⬜ |
@@ -31,4 +31,4 @@ Each milestone = one git commit (at least). Rules: SQL lives only in `internal/s
 - [x] round-trip proven in browser: added bread + eggs, rows land in `expense.db`
 - [x] 303 redirect + F5-protection verified (refresh re-GETs, no duplicates)
 - [x] deferred to milestone 5: CSS + static files (`FileServer` + `web/static/`)
-- [ ] commit milestone 2 (includes the staged `prove.db`/`.DS_Store` untracking)
+- [x] commit milestone 2 (includes the staged `prove.db`/`.DS_Store` untracking)
