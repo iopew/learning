@@ -141,7 +141,7 @@ limited := io.LimitReader(r, 1024)  // only the first 1024 bytes pass through
 teed := io.TeeReader(r, file)     // reads normally, but ALSO writes a copy into file
 ```
 
-**The manual read loop** — what `ReadAll` does inside, and what you write when streaming:
+**The manual read loop**  —  what `ReadAll` does inside, and what you write when streaming:
 
 ```go
 buf := make([]byte, 512)
