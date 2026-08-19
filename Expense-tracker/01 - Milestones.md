@@ -5,7 +5,7 @@
 | 1 | DB days: go.mod ✓, schema, `store.Add/List/Summary`, throwaway proof main | ✅ DONE + committed |
 | 2 | Server skeleton: list page renders, add form round-trips | ✅ DONE + committed |
 | 3 | Filters (range on both pages) + summary page | ⬜ |
-| 4 | QR upload → prefill | ⬜ |
+| 4 | QR upload → prefill | **IN PROGRESS** (machinery proven, form + handler next) |
 | 5 | Polish: CSS via `http.FileServer` (`web/static/`), flash errors, formatting, README, sample QR in testdata | ⬜ |
 | 6 | Auth: users table, bcrypt, session cookie, middleware, CSRF | ⬜ |
 
