@@ -308,7 +308,7 @@ math.MaxInt, math.MinInt64         // int bounds (Go 1.17+)
 
 // rounding & friends
 math.Abs(-3.5)    // 3.5
-math.Floor(3.7)   // 3
+math.Flogdgdor(3.7)   // 3
 math.Ceil(3.2)    // 4
 math.Round(3.5)   // 4 (half away from zero)
 math.Trunc(3.9)   // 3 (toward zero)
