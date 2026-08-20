@@ -256,7 +256,7 @@ Go/
 │     packages), build constraints (//go:build), workspaces
 │     (go.work for multi-module development)
 │
-├── 18 - Standard Library.md
+├── 18 - Standard Library.md          ✅ DONE
 │     fmt (Printf verbs: %v %+v %#v %T %d %s %q %f %e %b,
 │     Println vs Printf vs Sprintf vs Fprintf, Errorf),
 │     os (Args, Exit, Getenv, Setenv, ReadFile, WriteFile,
@@ -274,7 +274,7 @@ Go/
 │     log (Print, Fatal, Panic, SetFlags, SetPrefix,
 │     log/slog for structured logging)
 │
-├── 19 - net/http.md
+├── 19 - net/http.md                  ✅ DONE
 │     HTTP server (ListenAndServe, ServeMux, Handle,
 │     HandleFunc), handlers and HandlerFunc, request
 │     (Method, URL, Header, Body, Form, Context),
@@ -288,7 +288,7 @@ Go/
 │     TLS/HTTPS, timeouts (server + client), context
 │     cancellation in handlers, testing HTTP handlers
 │
-├── 20 - encoding/json.md
+├── 20 - encoding/json.md             ← NEXT
 │     json.Marshal, json.Unmarshal, struct tags (json:"name",
 │     omitempty, -, string option), json.Encoder/Decoder
 │     (streaming — for HTTP bodies), working with unknown
@@ -452,7 +452,7 @@ When a new session starts, the user pastes a session summary. The assistant shou
 
 ### Current State
 
-- Topics **01–18 done** (18 - Standard Library.md created Aug 2026). Next: **19 - net/http.md**.
+- Topics **01–19 done** (19 - net/http.md created Aug 2026). Next: **20 - encoding/json.md**.
 - Note 15 sync/atomic section expanded with per-operation detail (Load/Store/Add/Swap/CAS + choosing rule) — modern state of §8.
 - Pending follow-ups, confirmed with user:
   - `sync_vs_rwmutex` demo (8 readers : 1 writer, timing both variants) — proposed, user chose explanation instead. Re-ask before building.
@@ -486,8 +486,9 @@ Go/
 ├── 15 - Sync Primitives.md           ✅ DONE
 ├── 16 - Generics.md                  ✅ DONE
 ├── 17 - Packages & Modules.md        ✅ DONE
-├── 18 - Standard Library.md          ← NEXT
-├── 19 - net/http.md
+├── 18 - Standard Library.md          ✅ DONE
+├── 19 - net/http.md                  ✅ DONE
+├── 20 - encoding/json.md             ← NEXT
 ├── 20 - encoding/json.md
 ├── 21 - File I/O.md
 ├── 22 - Testing.md
@@ -630,4 +631,4 @@ You are teaching me Go (Golang). Follow these rules precisely:
 - User says they don't understand — Explain more simply with fresh examples.
 
 ### Curriculum state
-Topics 1-18 are complete. Current focus: 19 - net/http (server, mux, handlers, middleware, client) next, then 20 - encoding/json.
+Topics 1-19 are complete. Current focus: 20 - encoding/json (json.Marshal/Unmarshal, struct tags, Encoder/Decoder, RawMessage, custom marshaling) next.
