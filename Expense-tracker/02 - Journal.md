@@ -44,3 +44,31 @@
 - AddExpense five-fix round: bit-size 64 (was 4), early returns, `_, err =`, err in prints, the redirect itself
 - static files: `file://` browser reads disk itself; `http://` it can only request — handlers are the delivery truck (CSS deferred to milestone 5)
 - proven in expense.db: 2 rows (bread 10000, eggs 38000), both `manual`
+
+## 2026-08-18 — Milestone 3 complete
+
+- filters live in the URL: `GET /expenses?from=...&to=...` — filtering stays in SQL (`WHERE BETWEEN`), Go just passes strings through
+- summary folded into the list page instead of a separate `/summary` route — one page, one round trip
+- delete: third DML verb (`DELETE FROM expenses WHERE id = ?`), id travels as hidden input, `r.FormValue` reads it like any form field
+- same factory shape, third 303 redirect — the rhythm holds
+- committed
+
+## 2026-08-19 — The pivot: QR dies, cheque PDF born
+
+- shared a real Korzinka cheque expecting a QR image — it's a **PDF**. QR machinery scrapped mid-milestone
+- redesign: upload PDF → extract text → walk lines with regexes → each item becomes its own expense row (`source="cheque"`), all stamped with the cheque's date
+- `ledongthuc/pdf`: `pdf.Open(path)` → `NumPage()` / `Page(i)` / `GetPlainText(nil)`; numbered dump of testdata as the map of the terrain
+- date bite proven: `\d{2}/\d{2}/\d{4}` finds it, `time.Parse("02/01/2006", m)` reads it day-first (the reference layout!), `.Format("2006-01-02")` emits ISO
+
+## 2026-08-21 — Parser complete + regexp bootcamp
+
+- regexp decoded piece by piece against real cheque lines: `\d`, `{n}`, `+`, `[class]`, `^ $`, `( )`; conclusion — many small patterns + a line-walk beat one giant pattern
+- `FindStringSubmatch` returns two recordings: `[0]` = whole match, `[1]` = what the parentheses boxed. Parens are boundary markers drawn by the pattern author — nothing is "omitted"
+- switch mechanics nailed: top-to-bottom, first true wins, one case per line — the loop re-asks all questions for every iteration
+- bug party: case 4 lost its `else` → total counted twice as a ghost fifth item · final check lived *inside* the loop → verdict spam on every line · promo section below the total kept overwriting `total` (20918! 871!) and injecting 2027 dates → labeled `break loop` fixed both
+- silent failure of the day: regexes typed with `, ` matched nothing at all, yet `sum == total == 0` passed the golden check → added `len(items) == 0` guard
+- inverted guard: `m != "" && date != ""` never sets date (first pass has date empty!) → `==`
+- `log.Fatal` banished from library code — fine in a CLI proving bench, kills a web server; regex already guarantees digits-only so `parseAmount` ignores `ParseInt`'s error honestly
+- `parseAmount` pipeline: `ReplaceAll(" ", "")` → `Split(",")[0]` → `ParseInt`; tiyin always `,00` on these cheques, whole soms by design
+- print became return: `internal/web/cheque.go` exports `parseCheque(text) (date, []ChequeItem, error)`; patterns compiled once at package level; pdfprove stays as the bench
+- next session: `ChequeExpense` handler (`r.FormFile`, `io.Seek` size trick, `pdf.NewReader`) + route + multipart form
