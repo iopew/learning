@@ -5,9 +5,10 @@
 | 1 | DB days: go.mod ✓, schema, `store.Add/List/Summary`, throwaway proof main | ✅ DONE + committed |
 | 2 | Server skeleton: list page renders, add form round-trips | ✅ DONE + committed |
 | 3 | Date-range filters (`from`/`to` query params), summary block inline, delete button per row | ✅ DONE + committed (Aug 18) |
-| 4 | Cheque PDF upload → parse items → auto-add each (`source="cheque"`) | **IN PROGRESS** (parser proven + moved into app; handler, route, form next) |
+| 4 | Cheque PDF upload → parse items → auto-add each (`source="cheque"`) | ✅ DONE (Aug 23, commit pending) |
 | 5 | Polish: CSS via `http.FileServer` (`web/static/`), flash errors, formatting, README, visible errors for rejected cheques | ⬜ |
 | 6 | Auth: users table, bcrypt, session cookie, middleware, CSRF | ⬜ |
+| 7 | Scanned cheques: image upload → tesseract OCR → hardened parser (`source="cheque"`) | ⬜ **NEXT** |
 
 Each milestone = one git commit (at least). Rules: SQL lives only in `internal/store/`; every mutation ends in a redirect; auth is milestone 6.
 
@@ -51,7 +52,26 @@ Each milestone = one git commit (at least). Rules: SQL lives only in `internal/s
 - [x] proving bench `cmd/pdfprove/main.go`: numbered text dump → date bite → full parser proven (`date + 4 items + total: 195238 sum == total: OK`)
 - [x] labeled `break loop` — a plain break inside the switch only exits the switch; the promo section below the total kept overwriting it and injecting 2027 dates
 - [x] parser moved into `internal/web/cheque.go`: prints became returns; guards added (empty items, `sum != total`); first-date-only; patterns compiled once at package level
-- [ ] `ChequeExpense` handler in handlers.go (`r.FormFile` → `Seek` size trick → `pdf.NewReader` → `parseCheque` → `st.Add` × N)
-- [ ] route `POST /expenses/cheque` in cmd/expense/main.go
-- [ ] upload form in list.html (`enctype="multipart/form-data"`)
-- [ ] browser round trip with the real PDF → commit milestone 4
+- [x] `ChequeExpense` handler in handlers.go (`r.FormFile` → `Seek` size trick → `pdf.NewReader` → `parseCheque` → `st.Add` × N)
+- [x] route `POST /expenses/cheque` in cmd/expense/main.go
+- [x] upload form in list.html (`enctype="multipart/form-data"` on the `<form>` tag, file input `name="cheque"`, own submit button)
+- [x] browser round trip with the real PDF → 4 rows stamped with the cheque's date, source `"cheque"`
+- [x] polish: `cleanDesc` — leading `¡`/emoji junk trimmed via `TrimLeftFunc(!unicode.IsLetter)` (the bite-1 deferral finally paid)
+- [ ] commit milestone 4
+
+## Milestone 7 checklist (scanned cheques via OCR)
+
+Bench findings from 2026-08-23 (`sips` renders sample PDF → PNG with ground truth, `tesseract -l eng` reads it back):
+
+- [x] bench proven: tesseract reads the rendered cheque; amounts survive perfectly, structure mostly survives
+- [x] damage report (noise differs run-to-run — resolution tuning is NOT reliability): date destroyed every run (`W387 LAMP 026`), item opener `1.` ↔ `1,`, `= ` separator once became `- `, `TO'LOV` case wobbles, total gets glued onto the marker line
+- [ ] bite 1 — date guard: walk ends with `date == ""` → return error (no dateless rows ever stored)
+- [ ] bite 2 — tolerant opener: `^\d+[.,] ` (comma happens)
+- [ ] bite 3 — tolerant separator: `[-=] ([\d ]+,\d{2})`
+- [ ] bite 4 — case-proof flag: compare lowercased `"to'lov uchun"`
+- [ ] bite 5 — total on the marker line: when flag flips, hunt trailing money on the same line; else keep waiting for a bare line
+- [ ] handler sniffs upload magic bytes: `%PDF` → ledongthuc path, PNG/JPEG → new OCR path (temp file → exec tesseract → read text) → both feed `parseCheque`
+- [ ] form accepts images too
+- [ ] round trip with a scan → commit milestone 7
+
+Engine note: tesseract stays behind one small bytes→text seam so a future swap (cloud API / on-device ML if this becomes a mobile app) changes nothing downstream.

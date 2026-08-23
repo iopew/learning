@@ -13,3 +13,10 @@ One line per lesson, grown during the project. The bug-party record.
 - ⬜ `log.Fatal` belongs in main() only — in library/handler code it kills the whole server
 - ⬜ `time.Parse` layouts are the reference time (Mon Jan 2 … 2006): `"02/01/2006"` reads day-first
 - ⬜ TrimSpace shaves string edges; ReplaceAll hits every occurrence — different jobs, pick deliberately
+- ⬜ interfaces promise capabilities, not facts: `io.Reader` gives bytes but has no `Len()` — measure a stream via `Seek(0, SeekEnd)` (return value = size), then rewind home
+- ⬜ file uploads travel as `multipart/form-data` — the enctype belongs on the `<form>` tag, and `r.FormFile` only unpacks what that header announces
+- ⬜ forms are sealed envelopes: each button submits its OWN form; a form without a submit button makes users click the wrong one and ship garbage to another route
+- ⬜ type mismatches die at compile time — a runtime `ParseInt` error means the wrong handler got hit, not a conversion bug. Grep the error string to find who printed it
+- ⬜ `TrimLeftFunc(s, func(r) bool { return !unicode.IsLetter(r) })` strips any leading junk (spaces, `¡`, emoji, BOM) without maintaining a character blacklist
+- ⬜ OCR noise is random per run — the same document makes different mistakes at different settings; validate at the boundary and reject loudly, never tune extraction into false trust
+- ⬜ golden check + defensive parser = the OCR contract: garbage can only bounce, never store

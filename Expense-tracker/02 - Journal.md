@@ -72,3 +72,26 @@
 - `parseAmount` pipeline: `ReplaceAll(" ", "")` → `Split(",")[0]` → `ParseInt`; tiyin always `,00` on these cheques, whole soms by design
 - print became return: `internal/web/cheque.go` exports `parseCheque(text) (date, []ChequeItem, error)`; patterns compiled once at package level; pdfprove stays as the bench
 - next session: `ChequeExpense` handler (`r.FormFile`, `io.Seek` size trick, `pdf.NewReader`) + route + multipart form
+
+## 2026-08-23 — Milestone 4 complete: cheque upload live end-to-end
+
+- `io.Seeker` decoded: every file has a cursor; `Seek(0, SeekEnd)` returns the new absolute position = the size (a tape measurement wearing a trench coat); rewind with `Seek(0, SeekStart)` or the next reader starts at EOF
+- why NewReader demands `size`: interfaces promise capabilities, not facts — `io.Reader` has no `Len()`; a stream doesn't know its own length, so we measure it ourselves
+- handler assembled bite by bite (navigate mode): FormFile → defer Close → seek pair → pdfprove's page loop transplanted verbatim (`log.Fatal` swapped for print+redirect+return) → `parseCheque(text)` → range `items` → one `st.Add` per row → final redirect *after* the loop closes
+- bug party:
+  - `NewReader` error path printed + returned without redirect → blank page on corrupt PDF
+  - `enctype` placed on the `<input>` instead of `<form>` → uploads still shipped urlencoded → `FormFile` rejected everything as non-multipart
+  - no submit button → clicked the sibling Add button → its sealed-envelope form POSTed empty amount to `/expenses/add` → phantom "bad amount" error. Detective lesson: grep the error string — it exists in exactly one handler
+  - false theory "Amount is int64, conversion fails": type mismatches are compile-time errors; a runtime ParseInt failure means the wrong route got hit, not a bad cast
+- two-line bite 3: route beside siblings in main.go + form in list.html; `sumbit` typo found (works only by browser forgiveness — invalid button types fall back to submit)
+- polish pass: leading junk on descriptions (`¡`, emoji — deferred since bite 1) killed by `cleanDesc`: `TrimLeftFunc` with inverted `unicode.IsLetter`, trims to the first letter of any alphabet; helper lives beside `parseAmount`
+- milestone 4 works: real Korzinka PDF → four clean rows, cheque's date, sum-check passed. Commit pending
+
+## 2026-08-23 — OCR experiment: the damage report
+
+- installed tesseract 5.5.3 (brew); `sips` (built-in macOS format shapeshifter) renders the sample PDF → PNG with KNOWN text = ground truth bench, same methodology as pdfprove
+- bench gotchas: leptonica refuses `/tmp/...` symlink paths (use `/private/tmp`); 201px render reads as blank; ~900px readable, ~1700px better — but errors DIFFER between runs
+- damage report: cheque date destroyed in every run (`18/08/2026` → `W387 LAMP 026`) · item opener flips `1.` ↔ `1,` · `= ` separator once read as `- ` · `TO'LOV UCHUN` case wobbles (`To'LOV`) · total glued onto the marker line so bareMoney can never see it · amounts themselves always survived (big fonts win)
+- key lesson: OCR noise is random per run → resolution tuning can't buy reliability; the parser must harden defensively and the golden check bounces garbage instead of storing it
+- traced both outputs against today's parser: all would be rejected (no date, dropped item, unreachable total) — rejection, not corruption. The check earns its keep again
+- decided: scanned cheques = separate milestone 7 (tomorrow): five hardening bites in cheque.go first, then handler sniffs magic bytes and routes images through tesseract behind a bytes→text seam
