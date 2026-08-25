@@ -6,11 +6,11 @@
 | 2 | Server skeleton: list page renders, add form round-trips | ✅ DONE + committed |
 | 3 | Date-range filters (`from`/`to` query params), summary block inline, delete button per row | ✅ DONE + committed (Aug 18) |
 | 4 | Cheque PDF upload → parse items → auto-add each (`source="cheque"`) | ✅ DONE (Aug 23, commit pending) |
-| 5 | Polish: CSS via `http.FileServer` (`web/static/`), flash errors, formatting, README, visible errors for rejected cheques | ⬜ |
-| 6 | Auth: users table, bcrypt, session cookie, middleware, CSRF | ⬜ |
-| 7 | Scanned cheques: image upload → tesseract OCR → hardened parser (`source="cheque"`) | ⬜ **NEXT** |
+| 5 | Scanned cheques: image upload → tesseract OCR → hardened parser (`source="cheque"`) | ⬜ **NEXT** |
+| 6 | Polish: CSS via `http.FileServer` (`web/static/`), flash errors, formatting, README, visible errors for rejected cheques | ⬜ |
+| 7 | Auth: users table, bcrypt, session cookie, middleware, CSRF | ⬜ |
 
-Each milestone = one git commit (at least). Rules: SQL lives only in `internal/store/`; every mutation ends in a redirect; auth is milestone 6.
+Each milestone = one git commit (at least). Rules: SQL lives only in `internal/store/`; every mutation ends in a redirect; auth is milestone 7.
 
 ## Milestone 1 checklist (DB days)
 
@@ -31,7 +31,7 @@ Each milestone = one git commit (at least). Rules: SQL lives only in `internal/s
 - [x] `cmd/expense/main.go` wiring — `store.Open` + guard, both routes, `log.Fatal(ListenAndServe)`
 - [x] round-trip proven in browser: added bread + eggs, rows land in `expense.db`
 - [x] 303 redirect + F5-protection verified (refresh re-GETs, no duplicates)
-- [x] deferred to milestone 5: CSS + static files (`FileServer` + `web/static/`)
+- [x] deferred to milestone 6: CSS + static files (`FileServer` + `web/static/`)
 - [x] commit milestone 2 (includes the staged `prove.db`/`.DS_Store` untracking)
 
 ## Milestone 3 checklist (filters, summary, delete)
@@ -59,7 +59,7 @@ Each milestone = one git commit (at least). Rules: SQL lives only in `internal/s
 - [x] polish: `cleanDesc` — leading `¡`/emoji junk trimmed via `TrimLeftFunc(!unicode.IsLetter)` (the bite-1 deferral finally paid)
 - [ ] commit milestone 4
 
-## Milestone 7 checklist (scanned cheques via OCR)
+## Milestone 5 checklist (scanned cheques via OCR)
 
 Bench findings from 2026-08-23 (`sips` renders sample PDF → PNG with ground truth, `tesseract -l eng` reads it back):
 
@@ -72,6 +72,6 @@ Bench findings from 2026-08-23 (`sips` renders sample PDF → PNG with ground tr
 - [ ] bite 5 — total on the marker line: when flag flips, hunt trailing money on the same line; else keep waiting for a bare line
 - [ ] handler sniffs upload magic bytes: `%PDF` → ledongthuc path, PNG/JPEG → new OCR path (temp file → exec tesseract → read text) → both feed `parseCheque`
 - [ ] form accepts images too
-- [ ] round trip with a scan → commit milestone 7
+- [ ] round trip with a scan → commit milestone 5
 
 Engine note: tesseract stays behind one small bytes→text seam so a future swap (cloud API / on-device ML if this becomes a mobile app) changes nothing downstream.

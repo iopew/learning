@@ -449,6 +449,7 @@ When a new session starts, the user pastes a session summary. The assistant shou
 4. When creating a topic note: follow the descriptor in "What Each Note Should Cover" below, the style above, and the existing `NN - Topic.md` notes as templates (same callouts, depth, structure). After creating: update the tree marker (`✅ DONE`/`← NEXT`) and note any new facts in "Current State" below.
 5. Code demos live as `.go` files next to the notes (`interfaces_demo/`, `100k_goroutines.go`). Run `go run -race` to verify before presenting. Small one-off snippets go in chat only, unless the user asks for a demo file.
 6. Verify cross-links after creating a note (Previous/Next navigation both directions).
+7. **Session exports live in `~/Documents/Learning/session-exports/`** — one level ABOVE this folder, shared across learning projects. Write new exports there — never loose in Golang/ or anywhere else. Naming: `session-YYYY-MM-DD.md`, where the date is the day the session **ended** (its last Updated timestamp).
 
 ### Current State
 

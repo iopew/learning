@@ -365,7 +365,7 @@ func logging(next http.Handler) http.Handler {
     })
 }
 
-// auth — reject before the handler runs (milestone 6!)
+// auth — reject before the handler runs (milestone 7!)
 func requireAuth(next http.Handler) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         if !isLoggedIn(r) {                              // check the session cookie §11
@@ -491,7 +491,7 @@ fmt.Println(c.Value)                  // "abc123"
 - **`Secure`** — only send over HTTPS (your milestone-6 session cookie wants this in production).
 - **`SameSite`** — stops the browser sending the cookie on cross-site requests: the core CSRF defense, *in addition to* your POST-for-mutations rule (§7).
 
-**Why you need it (milestone 6):** your auth middleware (§9) will check `r.Cookie("session")` → look up the user in the DB → attach the user to `r.Context()` (§14) → `next.ServeHTTP`. The cookie is just the browser's half of the handshake; the server keeps the real session data.
+**Why you need it (milestone 7):** your auth middleware (§9) will check `r.Cookie("session")` → look up the user in the DB → attach the user to `r.Context()` (§14) → `next.ServeHTTP`. The cookie is just the browser's half of the handshake; the server keeps the real session data.
 
 > [!tip] Cookies are also where the "flash message" polish idea lives: set a cookie on a failed action, read-and-delete it on the next page render, show it once. That's the milestone-5 flash-errors plan in one line.
 
@@ -641,7 +641,7 @@ func slowHandler(w http.ResponseWriter, r *http.Request) {
 rows, err := s.db.QueryContext(ctx, `SELECT ...`, from, to)   // vs plain Query
 ```
 
-**Storing values (milestone 6's auth hook):** middleware attaches the authenticated user to the request's context, handlers read it back:
+**Storing values (milestone 7's auth hook):** middleware attaches the authenticated user to the request's context, handlers read it back:
 
 ```go
 type ctxKey string

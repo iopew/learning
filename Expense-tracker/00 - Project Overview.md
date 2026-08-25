@@ -14,7 +14,7 @@
 
 ## Explicitly NOT in v1
 
-- auth (milestone 6, after app works), users, multi-currency, categories CRUD, editing, budgets, charts, JS
+- auth (milestone 7, after app works), users, multi-currency, categories CRUD, editing, budgets, charts, JS
 
 ## Decision log
 

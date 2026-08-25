@@ -94,4 +94,4 @@
 - damage report: cheque date destroyed in every run (`18/08/2026` → `W387 LAMP 026`) · item opener flips `1.` ↔ `1,` · `= ` separator once read as `- ` · `TO'LOV UCHUN` case wobbles (`To'LOV`) · total glued onto the marker line so bareMoney can never see it · amounts themselves always survived (big fonts win)
 - key lesson: OCR noise is random per run → resolution tuning can't buy reliability; the parser must harden defensively and the golden check bounces garbage instead of storing it
 - traced both outputs against today's parser: all would be rejected (no date, dropped item, unreachable total) — rejection, not corruption. The check earns its keep again
-- decided: scanned cheques = separate milestone 7 (tomorrow): five hardening bites in cheque.go first, then handler sniffs magic bytes and routes images through tesseract behind a bytes→text seam
+- decided: scanned cheques = separate milestone — now **#5** (tomorrow): five hardening bites in cheque.go first, then handler sniffs magic bytes and routes images through tesseract behind a bytes→text seam

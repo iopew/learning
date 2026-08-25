@@ -469,7 +469,7 @@ logger.Error("db failed", "err", err)
 // {"time":"...","level":"ERROR","msg":"db failed","err":"..."}
 ```
 
-> [!note] `log.Printf` is the debug friend; `slog` is the production friend. When the expense-tracker grows a logging middleware (milestone 6), that's slog's moment.
+> [!note] `log.Printf` is the debug friend; `slog` is the production friend. When the expense-tracker grows a logging middleware (milestone 7), that's slog's moment.
 
 ---
 
