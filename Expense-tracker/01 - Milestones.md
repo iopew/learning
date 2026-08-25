@@ -5,8 +5,8 @@
 | 1 | DB days: go.mod ✓, schema, `store.Add/List/Summary`, throwaway proof main | ✅ DONE + committed |
 | 2 | Server skeleton: list page renders, add form round-trips | ✅ DONE + committed |
 | 3 | Date-range filters (`from`/`to` query params), summary block inline, delete button per row | ✅ DONE + committed (Aug 18) |
-| 4 | Cheque PDF upload → parse items → auto-add each (`source="cheque"`) | ✅ DONE (Aug 23, commit pending) |
-| 5 | Scanned cheques: image upload → tesseract OCR → hardened parser (`source="cheque"`) | ⬜ **NEXT** |
+| 4 | Cheque PDF upload → parse items → auto-add each (`source="cheque"`) | ✅ DONE + committed (Aug 25) |
+| 5 | Scanned cheques: image upload → OCR (tesseract → Gemini 3.6 Flash ready-JSON) → hardened parser (`source="cheque"`) | ✅ DONE + committed (Aug 25) |
 | 6 | Polish: CSS via `http.FileServer` (`web/static/`), flash errors, formatting, README, visible errors for rejected cheques | ⬜ |
 | 7 | Auth: users table, bcrypt, session cookie, middleware, CSRF | ⬜ |
 
@@ -57,7 +57,7 @@ Each milestone = one git commit (at least). Rules: SQL lives only in `internal/s
 - [x] upload form in list.html (`enctype="multipart/form-data"` on the `<form>` tag, file input `name="cheque"`, own submit button)
 - [x] browser round trip with the real PDF → 4 rows stamped with the cheque's date, source `"cheque"`
 - [x] polish: `cleanDesc` — leading `¡`/emoji junk trimmed via `TrimLeftFunc(!unicode.IsLetter)` (the bite-1 deferral finally paid)
-- [ ] commit milestone 4
+- [x] committed (Aug 25)
 
 ## Milestone 5 checklist (scanned cheques via OCR)
 
@@ -65,13 +65,13 @@ Bench findings from 2026-08-23 (`sips` renders sample PDF → PNG with ground tr
 
 - [x] bench proven: tesseract reads the rendered cheque; amounts survive perfectly, structure mostly survives
 - [x] damage report (noise differs run-to-run — resolution tuning is NOT reliability): date destroyed every run (`W387 LAMP 026`), item opener `1.` ↔ `1,`, `= ` separator once became `- `, `TO'LOV` case wobbles, total gets glued onto the marker line
-- [ ] bite 1 — date guard: walk ends with `date == ""` → return error (no dateless rows ever stored)
-- [ ] bite 2 — tolerant opener: `^\d+[.,] ` (comma happens)
-- [ ] bite 3 — tolerant separator: `[-=] ([\d ]+,\d{2})`
-- [ ] bite 4 — case-proof flag: compare lowercased `"to'lov uchun"`
-- [ ] bite 5 — total on the marker line: when flag flips, hunt trailing money on the same line; else keep waiting for a bare line
-- [ ] handler sniffs upload magic bytes: `%PDF` → ledongthuc path, PNG/JPEG → new OCR path (temp file → exec tesseract → read text) → both feed `parseCheque`
-- [ ] form accepts images too
-- [ ] round trip with a scan → commit milestone 5
-
-Engine note: tesseract stays behind one small bytes→text seam so a future swap (cloud API / on-device ML if this becomes a mobile app) changes nothing downstream.
+- [x] bite 1 — date guard moved to handler: `date == ""` → `!usedOCR`? reject, else `time.Now()` (scans fallback to today)
+- [x] bite 2 — tolerant opener: `^\d+[.,] ` (comma happens) + same-line hunt for `4. Kefir ... 15 390,00` via `endMoney` + sips 900→1200
+- [x] bite 3 — tolerant separator: `[-=] ([\d ]+,\d{2})` (also `*` weight noise) + generic trailing-money `endMoney` for Yorma `4009 4 990,00`
+- [x] bite 4 — case-proof flag: `strings.Contains(strings.ToLower(...), "to'lov uchun")`
+- [x] bite 5 — total on the marker line: `endMoney` glued `TO'LOV UCHUN: 195 238,00` + `sips` 900→1200 + year guard 2025-2027
+- [x] handler sniffs magic bytes: `%PDF` → ledongthuc, PNG/JPEG → `sips resample 900→1200` → `tesseract` with `usedOCR` date fallback
+- [x] Gemini 3.6 Flash ready-JSON kitchen added: `internal/web/gemini.go` (`geminiExtract`), prompt any-store generic, `map[string]interface{}` request, `GEMINI_API_KEY` via `.env` (gitignored), both image kitchens try Gemini first → `st.Add` direct, fallback to tesseract
+- [x] form `accept="image/*,application/pdf"` + `sips` resample for 321px screenshots → `mismatch 128651 != 133641` fixed via Kefir same-line + Yorma trailing-money
+- [x] bench: digital PDF 4 rows, 321px PNG/JPG via tesseract correctly bounces `mismatch` (golden check), via Gemini adds 6 rows `133641` (year 2023→today fallback)
+- [x] committed (Aug 25) — f06db81
