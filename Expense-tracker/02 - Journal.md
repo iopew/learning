@@ -95,3 +95,12 @@
 - key lesson: OCR noise is random per run → resolution tuning can't buy reliability; the parser must harden defensively and the golden check bounces garbage instead of storing it
 - traced both outputs against today's parser: all would be rejected (no date, dropped item, unreachable total) — rejection, not corruption. The check earns its keep again
 - decided: scanned cheques = separate milestone — now **#5** (tomorrow): five hardening bites in cheque.go first, then handler sniffs magic bytes and routes images through tesseract behind a bytes→text seam
+
+## 2026-08-25 — Milestone 5 branching — Gemini ready-JSON
+
+- branched per user request: `main` = tesseract-only skeleton (offline, `sips 1200` + `tesseract -l eng`), `feature/gemini` = Gemini-only (direct `data []byte` → `gemini-3.6-flash`), `git branch feature/gemini` + `git push -u expense-tracker` (remote is `expense-tracker`, not `origin`)
+- `geminiExtract` built bite-by-bite (navigate mode): `os.Getenv` + `.env` fallback, `http.DetectContentType(data)` + `base64.StdEncoding`, any-store prompt (Uzbek any store, `Read EXACTLY`, `If blurry return ""`), `map[string]interface{}` → `json.Marshal` (heterogeneous JSON), `https://...gemini-3.6-flash:generateContent?key=`, `http.Post` + `gr.Candidates[0].content.parts[0].text` → strip fences → `json.Unmarshal` → `[]ChequeItem`
+- handler now direct bytes: `file.Seek` + `io.ReadAll` → `geminiExtract(data)` for both `isPDF` scanned fallback and `else` image, no `os.CreateTemp`, no `sips`, no `os/exec` on `feature/gemini`; `main` keeps `sips` + `tesseract`
+- bench: `2026-08-24 17.56.22.png` (321×1280 narrow phone shot) → tesseract `mismatch 128651 != 133641` (Yorma 4990 short, Kefir same-line), Gemini `2023-08-23` → year guard `2025-2027` fallback to today, then `2026-08-25 15.55.25.jpg` (359×1280 tighter crop) → Gemini `2026-08-23` correct, 6 rows `133641` (year fix + `sips 1200` + strict prompt)
+- committed `main` `fa3fb59` and `feature/gemini` `c6379b9` + `cb8833f` fix, `git push` both, GitHub `Compare & pull request` banner is just a suggestion — keep branches diverged
+- `go vet` green on both branches, `GEMINI_API_KEY` via `.env` (600, gitignored, `echo ".env" >> .gitignore`)
