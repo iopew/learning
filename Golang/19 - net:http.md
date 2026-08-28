@@ -27,166 +27,115 @@
 
 ## 1. HTTP in One Picture
 
-`net/http` is a complete HTTP toolkit in one package: the **server** (what your expense-tracker runs) and the **client** (what `curl`, browsers, and other programs use to talk to it). Both halves share the same model of the protocol.
+`net/http` is server + client in one package — `ListenAndServe` runs your app, `Get/Post` talks to others. Both share the same request/response model.
 
 ```
-client (browser, curl)                    server (your app)
-   │   GET /expenses?from=...&to=...            │
-   │ ──────────────────────────────────────────► │  handle → run SQL → build HTML
-   │   HTTP/1.1 200 OK                          │
-   │ ◄────────────────────────────────────────── │
+browser/curl                         server (your app)
+  │  GET /expenses?from=2026-08-01     │
+  │ ─────────────────────────────────► │ handle → SQL → HTML
+  │  HTTP/1.1 200 OK                   │
+  │ ◄───────────────────────────────── │
 ```
 
-The transaction is always one shape: the client sends a **request** (method, path, headers, optional body); the server sends a **response** (status code, headers, optional body). Forms, JSON, file uploads — all variations of those two envelopes.
+Request = method + path + headers + body. Response = status + headers + body. Go exposes decoded `*http.Request` and `http.ResponseWriter`.
 
-**A request line, decoded** (what the browser writes on the wire):
-
-```
-GET /expenses?from=2026-08-01&to=2026-08-31 HTTP/1.1
-Host: localhost:8080
-
-method    path          query string               version
-```
-
-Go hides the wire from you — you read/write the *decoded* pieces through `*http.Request` and `http.ResponseWriter`.
-
-> [!note] HTTP is a **text** protocol — everything that travels is text. That's why handlers always receive strings (`"20000"`) and must `strconv.ParseInt` them ([[18 - Standard Library]] §6): the wire has no `int` type.
-
-> [!note] Each incoming request runs in **its own goroutine** ([[12 - Goroutines]] §net/http). Two visitors never block each other — the server is concurrent by default, and that's also why shared state between handlers needs [[15 - Sync Primitives]] discipline.
+> [!note] HTTP is text — handlers receive strings `"20000"` → `strconv.ParseInt` [[18 - Standard Library]] §6. Each request runs in its own goroutine [[12 - Goroutines]] §net/http → protect shared state with [[15 - Sync Primitives]].
 
 ---
 
 ## 2. The Server — ListenAndServe, ServeMux, Handle
 
-**The one line that starts everything:**
-
 ```go
-log.Fatal(http.ListenAndServe(":8080", mux))
+log.Fatal(http.ListenAndServe(":8080", mux)) // blocks forever; return = dead server
 ```
 
-Two arguments, two jobs:
-
-- `":8080"` — the **address**: `host:port`. Empty host = all interfaces; `":0"` = a random free port.
-- `mux` — the **handler**: the object that decides what happens to every request. (Your project passes a `*http.ServeMux` — the router.)
-
-It **blocks forever**: accept connection → read request → hand to `mux` → write response → repeat. It returns only when the server dies — which is why it's wrapped in `log.Fatal` ([[18 - Standard Library]] §10): the only way out is a fatal error.
-
-**The two registration methods on a mux:**
+- `":8080"` = `host:port` (`":0"` = random port, `""` = all interfaces)
+- `mux` = router implementing `Handler`
 
 ```go
 mux := http.NewServeMux()
-
-mux.Handle("/expenses", h)        // Handle: takes a Handler (interface)
-mux.HandleFunc("/hello", func(w, r){...})  // HandleFunc: takes a function
+mux.Handle("/expenses", h)                                    // Handler interface
+mux.HandleFunc("/hello", func(w http.ResponseWriter, r *http.Request) {...}) // function
 ```
 
-`HandleFunc` is `Handle` with the function-to-interface adapter applied for you (§3). Both store a pattern → handler pair in the router.
-
-**The modern server struct** — for control (timeouts, TLS, per-server settings):
+`HandleFunc` is `Handle` plus `HandlerFunc` conversion (§3).
 
 ```go
 srv := &http.Server{
-    Addr:         ":8080",
-    Handler:      mux,
-    ReadTimeout:  10 * time.Second,
+    Addr: ":8080",
+    Handler: mux,
+    ReadTimeout: 10 * time.Second,
     WriteTimeout: 10 * time.Second,
 }
-log.Fatal(srv.ListenAndServe())        // or srv.ListenAndServeTLS(cert, key)
+log.Fatal(srv.ListenAndServe()) // same as ListenAndServe, with timeout knobs (§13)
 ```
-
-`ListenAndServe`'s two arguments are just the zero-cost defaults of `http.Server`. The struct is the same server with knobs.
-
-> [!tip] `http.ListenAndServeTLS(":443", cert, key, mux)` does HTTPS with the one-liner. Local dev stays plain HTTP because you need certificates first (§13).
 
 ---
 
 ## 3. Handlers — The Interface & HandlerFunc
 
-Everything in net/http funnels through **one interface:**
+Single interface for the whole package:
 
 ```go
-type Handler interface {
-    ServeHTTP(w http.ResponseWriter, r *http.Request)
-}
+type Handler interface { ServeHTTP(w http.ResponseWriter, r *http.Request) }
 ```
 
-One method, two parameters. Any type with a `ServeHTTP` method is a Handler — including `*http.ServeMux`, which is why `ListenAndServe(":8080", mux)` works.
+`*http.ServeMux` implements it — why `ListenAndServe(":8080", mux)` compiles.
 
-**The function adapter** — the bridge from "function" to "interface":
+**Function adapter:**
 
 ```go
 type HandlerFunc func(w http.ResponseWriter, r *http.Request)
-
-// HandlerFunc implements ServeHTTP — it just calls itself:
-func (f HandlerFunc) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-    f(w, r)
-}
+func (f HandlerFunc) ServeHTTP(w http.ResponseWriter, r *http.Request) { f(w, r) }
 ```
 
-A function type *with a method*. This is why a plain function can stand anywhere a Handler is expected — `mux.HandleFunc` is precisely this conversion.
+Any `func(w, r)` becomes a `Handler` via cast. `mux.HandleFunc` does this cast for you.
 
-**The factory pattern** — your milestone-2 shape ([[04 - Functions]] §closures): a function that *builds* a handler with captured state:
+**Factory — handler with dependencies (your `store` shape):**
 
 ```go
 func AddExpense(st *store.Store) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
-        // st is captured in the closure — the handler carries its store
-        st.Add(...)
+        st.Add(...) // st closed over
         http.Redirect(w, r, "/expenses", http.StatusSeeOther)
     }
 }
 ```
 
-**Why the pattern:** a handler that needs dependencies (a store, a logger, a config) has nowhere to get them — `ServeHTTP` only receives `w` and `r`. The factory closes over them. Handlers that need nothing can be plain functions — your milestone-4 scan handler was the first such case.
+`ServeHTTP` only gives `w,r` — factory closes over `st`, `cfg`, logger. Handlers with no deps are plain functions.
 
-> [!info] You met the interface + adapter without the names in milestone 2. `http.HandlerFunc` and `http.Handler` are the single most repeated shape in Go web code — every framework (echo, gin, chi) is built on handlers shaped exactly like these.
+> [!tip] `http.HandlerFunc` and `http.Handler` are the most repeated types in Go web code — `echo/gin/chi` all implement the same `ServeHTTP`.
 
 ---
 
 ## 4. The Request — Method, URL, Header, Body, Form
 
-`*http.Request` is the decoded envelope. The fields you'll use daily:
-
 ```go
-r.Method                      // "GET", "POST", "PUT", ...
-r.URL.Path                    // "/expenses" — no query
-r.URL.RawQuery                // "from=2026-08-01&to=..." — the raw query text
-r.URL.Query()                 // url.Values — parsed query params
-r.PathValue("id")             // wildcard capture (Go 1.22+)
-r.Header.Get("Content-Type")  // one header (Header is a map)
-r.Body                        // io.ReadCloser — the raw request body stream
-r.FormValue("amount")         // form field from query OR body — the workhorse
-r.FormFile("qr")              // uploaded file → (multipart.File, *FileHeader, err)
-r.Context()                   // the request's context (§14) — cancelled when the client disconnects
-r.RemoteAddr                  // "127.0.0.1:52341" — who's calling
+r.Method                    // "GET", "POST", "PUT", "DELETE"
+r.URL.Path                  // "/expenses"
+r.URL.RawQuery              // "from=2026-08-01&to=2026-08-31"
+r.URL.Query().Get("from")   // "2026-08-01" — parsed
+r.PathValue("id")           // wildcard Go 1.22+ — always string
+r.Header.Get("Content-Type")
+r.Body                      // io.ReadCloser — stream, read once
+r.FormValue("amount")       // query OR body — workhorse, always string
+r.PostFormValue("amount")   // body only — when query and body share name
+r.FormFile("cheque")        // uploaded file → (File, *FileHeader, err)
+r.Context()                 // cancelled on disconnect (§14)
+r.RemoteAddr                // "127.0.0.1:52341"
 ```
 
-**The four ways data arrives:**
+| Source | Example | Read |
+|---|---|---|
+| URL query | `/expenses?from=2026-08-01` | `r.URL.Query().Get("from")` |
+| Wildcard | `/expenses/7` | `r.PathValue("id")` |
+| Form body | `description=bread&amount=10000` | `r.FormValue("description")` |
+| File | multipart cheque PDF | `r.FormFile("cheque")` |
 
-| Source       | Example                                   | How to read                  |
-| ------------ | ----------------------------------------- | ---------------------------- |
-| URL query    | `/expenses?from=2026-08-01&to=2026-08-31` | `r.URL.Query().Get("from")`  |
-| URL wildcard | `/expenses/7`                             | `r.PathValue("id")`          |
-| Form body    | `POST` + `description=bread&amount=10000` | `r.FormValue("description")` |
-| File upload  | multipart body (the cheque PDF)           | `r.FormFile("qr")`           |
+- `r.FormValue` calls `r.ParseForm()` internally, merges `r.Form` + `r.PostForm`, returns first hit.
+- `r.Body` vs `FormValue` — read one, not both. Once `Body` consumed, `FormValue` sees `""`. JSON uses `r.Body` (§10), forms use `FormValue`.
 
-**Form parsing — the two layers:**
-
-- **`r.FormValue`** — the shortcut: parses both query and body, merges them, returns the first hit. One call for either source. (`r.PostFormValue` reads only the body — useful when a query param and a form field share a name.)
-- **`r.ParseForm()`** — the explicit version: parses into `r.Form` / `r.PostForm` (the `url.Values` maps) so you can inspect *all* fields at once. `FormValue` calls this internally.
-
-**The Body is a stream, read once:**
-
-```go
-data, err := io.ReadAll(r.Body)   // whole body → []byte ([[18]] §3)
-defer r.Body.Close()
-```
-
-Read `r.Body` *or* `FormValue` — not both. Once the stream is consumed, `FormValue` finds nothing. For JSON bodies you read `r.Body` directly (§10); for forms you use `FormValue`; the server decides the format by `Content-Type`.
-
-> [!warning] `FormValue` on a file-upload form returns an empty string — files don't live in `r.Form`; they come through `r.FormFile`. The two channels are separate.
-
-> [!tip] `r.Header` is a map — `r.Header["Content-Type"]` gives the whole slice of values; `r.Header.Get` gives the first. Both are case-insensitive: HTTP header names are case-insensitive by spec.
+> [!warning] `FormValue` on file-upload returns `""` — files come via `FormFile` only. `r.Header` is case-insensitive — `r.Header.Get("content-type")` works.
 
 ---
 
@@ -194,510 +143,368 @@ Read `r.Body` *or* `FormValue` — not both. Once the stream is consumed, `FormV
 
 ```go
 type ResponseWriter interface {
-    Header() http.Header        // the response's headers — set BEFORE writing
-    Write([]byte) (int, error)  // the body — also satisfies io.Writer
-    WriteHeader(int)            // the status code — implicit if never called
+    Header() http.Header        // response headers — set BEFORE Write
+    Write([]byte) (int, error)  // body — also io.Writer
+    WriteHeader(int)            // status — implicit 200 if never called
 }
 ```
 
-**The three rules:**
-
-1. **`Write` is the body.** And because it's an `io.Writer`, `fmt.Fprintln(w, ...)`, `tmpl.Execute(w, data)`, and `io.Copy(w, file)` all work with zero adapters ([[18 - Standard Library]] §3). That one interface is why your template render is a single line.
-2. **`Header().Set` before `Write`.** After the first `Write`, the header set is frozen — the status line has already left the server.
-3. **`WriteHeader` — or the implicit 200.** Not calling it = Go writes `200 OK` at the first `Write`. Call it *first* when the status isn't 200.
+1. `Write` = body. Because it’s `io.Writer`, `fmt.Fprintln(w, ...)`, `tmpl.Execute(w, data)`, `io.Copy(w, file)` all work with no adapter [[18 - Standard Library]] §3.
+2. `Header().Set` before `Write` — after first `Write` headers frozen.
+3. No `WriteHeader` = `200 OK` at first `Write`. Call `WriteHeader(404)` *before* `Write`.
 
 ```go
 w.Header().Set("Content-Type", "text/html; charset=utf-8")
-w.WriteHeader(http.StatusNotFound)        // MUST come before Write
+w.WriteHeader(http.StatusNotFound)
 fmt.Fprintln(w, "not found")
 ```
 
-**Content-Type auto-detection:** if you never set it, Go sniffs the body (`http.DetectContentType`) — fine for HTML, but for JSON it may guess `text/plain; charset=utf-8`; set `application/json` explicitly (§10).
+Go sniffs `Content-Type` via `http.DetectContentType` if you don’t set it — ok for HTML, but for JSON set `application/json` explicitly (§10).
 
-> [!warning] The double-write trap: calling `Write` before `WriteHeader(500)` means the 200 status has already been sent — the 500 is silently ignored (and logged as "superfluous WriteHeader"). **Decide the status first, then write.** Your handlers dodge this because the mutation path writes nothing at all — it redirects (§7).
+> [!warning] `Write` before `WriteHeader(500)` keeps `200` and logs `superfluous WriteHeader`. Your mutation handlers avoid this by redirecting — they never `Write` (§7).
 
 ---
 
 ## 6. Routing — stdlib mux vs gorilla/mux vs chi
 
-### The stdlib mux (Go 1.22+ patterns)
-
-Modern `ServeMux` matches method + path and hands off to the handler:
+**Stdlib `ServeMux` (Go 1.22+):**
 
 ```go
-mux := http.NewServeMux()
-
-mux.HandleFunc("GET /expenses", web.ListPage(st))        // method + space + path
+mux.HandleFunc("GET /expenses", web.ListPage(st))
 mux.HandleFunc("POST /expenses/add", web.AddExpense(st))
-mux.HandleFunc("GET /expenses/scan", web.ScanExpense)    // plain func, no st
-```
-
-- **Method + path:** a POST to `/expenses` does not match the GET pattern — it gets `405 Method Not Allowed` instead of silently running the GET handler.
-- **Wildcards:**
-
-```go
 mux.HandleFunc("GET /expenses/{id}", handler)
-id := r.PathValue("id")        // "7" — the capture, always a string
+id := r.PathValue("id") // "7" — always string, ParseInt yourself
 ```
 
-- **Precedence is automatic:** the most specific pattern wins — `/expenses/7` beats `/expenses/{id}` beats `/expenses/` (the tree catch-all). No ordering bugs.
-- **Trailing slash:** `/expenses/` matches everything under `/expenses/`; `/expenses` matches only the exact path.
-- Pre-1.22, `"/expenses"` matched *any* method — the exact bug you hit in milestone 2 (`GET /expense/add` vs `POST /expenses/add`).
+- `GET /expenses` ≠ `POST /expenses` → `405 Method Not Allowed`, not `404`
+- Precedence: most specific wins — `/expenses/7` > `/expenses/{id}` > `/expenses/` (catch-all)
+- `/expenses` exact, `/expenses/` = subtree `"/expenses/*"`
+- Pre-1.22 `"/expenses"` matched any method — your `GET /expense/add` vs `POST /expenses/add` bug `02 - Journal.md:40`
 
-### Third-party routers
+**Third-party routers** — same `http.Handler` interface, drop into `ListenAndServe` unchanged:
 
-When the stdlib mux's rules get limiting (regex routes, grouped middleware, subrouters), the ecosystem has mature options — same `http.Handler` interface, so they drop into `ListenAndServe` unchanged:
-
-| Router | Style | Why you'd pick it |
-|---|---|---|
-| stdlib `ServeMux` | method + path patterns (1.22+) | nothing to add; most apps never outgrow it |
-| **gorilla/mux** | `r.Path("/a/{id}").Methods("GET")`, subrouters, regex `{id:[0-9]+}` | the classic; route-level middleware chaining |
-| **chi** | method-first, middleware `r.Use(...)`, context value access `chi.URLParam(r, "id")` | idiomatic stdlib-style composition; a popular modern default |
+| Router | Pattern | Wildcard + Middleware | Why pick |
+|---|---|---|---|
+| **stdlib `ServeMux`** | `"GET /expenses"` | `{id}` + `r.PathValue("id")` | Zero deps — most apps never outgrow |
+| `gorilla/mux` | `r.HandleFunc("/a/{id:[0-9]+}").Methods("GET")` | Regex `{id:[0-9]+}`, `r.PathPrefix("/api").Subrouter()` | Classic, route-level chaining, archived now |
+| `chi` | `r.Get("/expenses/{id}", h)` + `r.Use(middleware.Logger)` | `chi.URLParam(r, "id")` + `r.Route("/api", fn)` grouping | Idiomatic stdlib-style, popular modern default |
 
 ```go
 // gorilla/mux
 r := mux.NewRouter()
 r.HandleFunc("/expenses/{id:[0-9]+}", handler).Methods("GET")
+api := r.PathPrefix("/api").Subrouter()
+api.Use(authMiddleware)
 
 // chi
 r := chi.NewRouter()
-r.Use(middleware.Logger)                       // middleware at the router level
-r.Get("/expenses/{id}", handler)               // 1.22-style method-first syntax
+r.Use(middleware.Logger)
+r.Get("/expenses/{id}", handler)
 id := chi.URLParam(r, "id")
+r.Route("/notes", func(r chi.Router) {
+    r.Use(RequireAuth)
+    r.Post("/add", CreateNote)
+})
 ```
 
-> [!note] All three share the same core: they satisfy `http.Handler` and match against method + path. The stdlib mux gained method matching + wildcards in Go 1.22, which closed most of the gap that created gorilla/mux. Start with the stdlib; reach for a library when the route table grows subrouters and per-group middleware.
+> [!tip] Start stdlib. Add `chi` when `r.Route` grouping saves 10+ manual `RequireAuth(handler)` wraps.
 
 ---
 
 ## 7. Status Codes & the Redirect
 
-The status code is the response's *headline* — a three-digit verdict read before any content.
-
 | Code | Name | Meaning |
 |---|---|---|
-| 200 | OK | everything worked |
-| 201 | Created | a POST that added a resource |
-| 204 | No Content | success, nothing to return |
-| 301 | Moved Permanently | the URL changed forever (browsers cache it) |
-| 303 | See Other | "the result is elsewhere — GET it" — the redirect |
-| 400 | Bad Request | the client sent nonsense (bad amount) |
-| 401 | Unauthorized | not authenticated |
-| 403 | Forbidden | authenticated but not allowed |
-| 404 | Not Found | no such route |
-| 405 | Method Not Allowed | route exists, wrong method |
-| 500 | Internal Server Error | the server broke (SQL failed) |
+| 200 OK | success |
+| 201 Created | POST added resource |
+| 204 No Content | success, no body |
+| 301 Moved Permanently | URL forever (browser caches) |
+| 303 See Other | `Redirect` — `GET` the target |
+| 400 Bad Request | bad `amount` |
+| 401 Unauthorized | not logged in |
+| 403 Forbidden | logged in, not allowed |
+| 404 Not Found | no route |
+| 405 Method Not Allowed | wrong method |
+| 500 Internal Server Error | SQL failed |
+| 429 Too Many Requests | rate limit (§9) |
 
-**The sacred redirect — every mutation in your app ends this way:**
+**Every mutation ends with 303:**
 
 ```go
-http.Redirect(w, r, "/expenses", http.StatusSeeOther)
+http.Redirect(w, r, "/expenses", http.StatusSeeOther) // Location + 303 → browser GETs /expenses
 ```
 
-Three arguments: writer, request, target, code. It writes a `Location` header + the 303; the **browser then issues a fresh GET to `/expenses`**. That's the whole **POST/Redirect/GET** pattern:
+`POST → 303 → GET` = F5 safe. Without it, refresh re-POSTs and re-inserts (duplicate-bread). 301 is cached forever — wrong for post-action redirect. Always use named constants `http.StatusSeeOther`, not `303`.
 
-- User POSTs an expense → you add the row → **303** → browser GETs the list → they see the new row.
-- **F5 protection:** responding with 200 + the form HTML instead would make refresh re-POST — re-inserting the row (your duplicate-bread bug from milestone 1). After a 303, refresh re-GETs — harmless.
-
-**Status constants:** every code has a named constant (`http.StatusOK`, `http.StatusSeeOther`, `http.StatusInternalServerError`) — always use the name, never the bare number.
-
-> [!warning] The redirect **writes nothing else**. Any `w.Write` before it has already started the response, and the redirect then fails silently ("superfluous WriteHeader"). In your handlers: guard → mutate → redirect, nothing in between.
+> [!warning] `Redirect` writes `Location` + status and nothing else. Any `w.Write` before it has already sent `200` — redirect fails silently.
 
 ---
 
 ## 8. Errors in Handlers
 
-A handler can't "return an error" — `ServeHTTP` returns nothing. So what happens when SQL fails? The pattern you've drilled since milestone 2:
+`ServeHTTP` returns nothing — you must write the error response:
 
 ```go
 if err != nil {
-    fmt.Println("failed to list:", err)                    // ① the log — with the ACTUAL err
-    http.Error(w, "oops", http.StatusInternalServerError)  // ② the client — generic message
-    return                                                // ③ stop. early return, always
+    fmt.Println("failed to list:", err)                   // log: real err [[11 - Error Handling]] §5
+    http.Error(w, "oops", http.StatusInternalServerError) // client: generic — don't leak table names
+    return                                                // always return
 }
 ```
 
-**`http.Error(w, message, code)`** — the one-line error responder: sets the status, writes the message as the body. It's `WriteHeader + Write` combined.
-
-The division of honesty:
-- The **client** gets a generic message — your SQL internals are a security leak (that's how people learn your table names).
-- The **log** gets the real error — that's where debugging happens.
-
-> [!tip] A handler that fails must still produce a *valid HTTP response* — never return having written nothing (the client hangs or gets an empty 200 — your delete-guard bug taught you this). The three-step shape — log, `http.Error`, `return` — guarantees a verdict every time. The `log` calls here are the debugging friend; milestone-6 middleware replaces them with structured logging (§9).
+`http.Error` = `WriteHeader + Write` in one call. Never return without writing — client hangs on empty `200` (your `Delete` `return` without `http.Error` bug).
 
 ---
 
 ## 9. Middleware — Wrapping Handlers
 
-A Handler is an interface — and an interface can *wrap* another. **Middleware** is a function that takes a Handler and returns a Handler, adding behavior around it:
+Takes a handler, returns a handler with extra behavior:
 
 ```go
 func logRequests(next http.Handler) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         start := time.Now()
-        next.ServeHTTP(w, r)                        // ① let the real handler run
+        next.ServeHTTP(w, r)
         fmt.Printf("%s %s in %v\n", r.Method, r.URL.Path, time.Since(start))
     })
 }
+mux.Handle("GET /expenses", logRequests(requireAuth(http.HandlerFunc(web.ListPage(st)))))
+// request → log → auth → handler → back out (onion)
 ```
 
-**Chaining** — middleware wrapping middleware:
+**Around vs Gate:**
 
 ```go
-mux.Handle("GET /expenses",
-    logRequests(
-        requireAuth(
-            http.HandlerFunc(web.ListPage(st)))))
-```
-
-The flow is an onion: request → `logRequests` → `requireAuth` → handler → back out. Each layer runs before *and* after the next. The inner handler never knows it's wrapped.
-
-**The four classic middlewares:**
-
-```go
-// logging — method, path, status, duration per request
+// Around — runs before + after
 func logging(next http.Handler) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         start := time.Now()
         next.ServeHTTP(w, r)
-        slog.Info("request", "method", r.Method, "path", r.URL.Path,
-            "dur", time.Since(start))                    // structured — [[18]] §10
+        slog.Info("request", "method", r.Method, "path", r.URL.Path, "dur", time.Since(start))
     })
 }
 
-// auth — reject before the handler runs (milestone 7!)
+// Gate — returns without next (auth, CORS preflight, rate limit)
 func requireAuth(next http.Handler) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        if !isLoggedIn(r) {                              // check the session cookie §11
+        if !isLoggedIn(r) { // r.Cookie("session") §11
             http.Redirect(w, r, "/login", http.StatusSeeOther)
-            return                                       // never call next
+            return // never calls next — request refused
         }
         next.ServeHTTP(w, r)
     })
 }
 
-// CORS — tell browsers which origins may call you
 func cors(next http.Handler) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         w.Header().Set("Access-Control-Allow-Origin", "*")
-        if r.Method == http.MethodOptions {              // preflight request
-            w.WriteHeader(http.StatusNoContent)
-            return
+        if r.Method == http.MethodOptions {
+            w.WriteHeader(http.StatusNoContent); return
         }
         next.ServeHTTP(w, r)
     })
 }
 
-// rate limiting — one counter per IP, refuse past the limit
 func rateLimit(next http.Handler) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         if tooMany(r.RemoteAddr) {
-            http.Error(w, "slow down", http.StatusTooManyRequests)  // 429
-            return
+            http.Error(w, "slow down", http.StatusTooManyRequests); return
         }
         next.ServeHTTP(w, r)
     })
 }
 ```
 
-**The two shapes of middleware:**
-
-- **Around** — behavior before and after the handler (logging, timing, recovery).
-- **Gate** — decide whether the handler runs at all (auth, CORS preflight, rate limit). The gate **returns without calling `next`** — that's how a request is refused.
-
-> [!tip] The factory pattern and middleware are the same trick from two sides: `AddExpense(st)` *creates* a handler with captured state; `logRequests(h)` *modifies* one by wrapping. Both are functions producing handlers — the core idiom of Go web code.
+> [!tip] Factory `AddExpense(st)` *creates* with state; middleware *wraps* with behavior — both are `func → Handler` `04 - Functions.md:617`.
 
 ---
 
 ## 10. JSON APIs — Encoding & Decoding Bodies
 
-Your app renders HTML, but APIs (and the milestone-6 future) speak JSON. Two directions, two patterns. (Full JSON reference: [[20 - encoding/json]])
-
-**Decoding — reading a JSON request body:**
-
 ```go
-type AddReq struct {
-    Description string `json:"description"`
-    Amount      int64  `json:"amount"`
+type AddReq struct { Description string `json:"description"`; Amount int64 `json:"amount"` }
+
+// Decode (read JSON body)
+var req AddReq
+if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+    http.Error(w, "bad json", http.StatusBadRequest); return
 }
 
-func handleJSON(w http.ResponseWriter, r *http.Request) {
-    var req AddReq
-    dec := json.NewDecoder(r.Body)        // stream from the request body
-    if err := dec.Decode(&req); err != nil {
-        http.Error(w, "bad json", http.StatusBadRequest)
-        return
-    }
-    // req is now populated — the tags mapped the JSON keys to fields
-}
-```
-
-`json.Decoder` reads from the `io.Reader` — and `r.Body` is one, so decoding is one line. The struct tags map wire names (`description`) to Go fields (`Description`) — unexported fields are silently ignored (the classic silent-bug source; [[20 - encoding/json]]).
-
-**Encoding — writing a JSON response:**
-
-```go
+// Encode (write JSON body)
 w.Header().Set("Content-Type", "application/json")
 w.WriteHeader(http.StatusCreated)
-json.NewEncoder(w).Encode(result)         // stream out — writes to an io.Writer
+json.NewEncoder(w).Encode(result) // adds trailing \n
 ```
 
-`json.Encoder.Encode` writes the marshaled JSON plus a trailing newline. Setting `Content-Type` *before* `Encode` beats the sniffing (§5).
-
-**The equivalents without the stream** — `json.Marshal` / `json.Unmarshal` work on whole `[]byte` in memory:
+`json.Marshal/Unmarshal` on `[]byte`:
 
 ```go
-data, _ := json.Marshal(result)      // struct → []byte
-w.Write(data)                        // then write it yourself
-
-var req AddReq
-body, _ := io.ReadAll(r.Body)
-json.Unmarshal(body, &req)           // []byte → struct
+data, _ := json.Marshal(result) // struct → []byte
+w.Write(data)
+var req AddReq; body, _ := io.ReadAll(r.Body); json.Unmarshal(body, &req)
 ```
 
-> [!note] `Marshal`/`Unmarshal` are the pure functions; `Encoder`/`Decoder` are the streaming wrappers that plug into `r.Body` and `w` directly. Your choose: small bodies — either works; large streams — Decoder/Encoder (no whole-body copy in memory).
+`Encoder/Decoder` stream via `r.Body`/`w` (no extra buffer), `Marshal/Unmarshal` buffer in memory — pick by size. Tags case-sensitive (`json:"amount"` ≠ `Amount`), unexported fields silently `→ {}` — verify on wire.
 
-> [!warning] Struct field names are **case-sensitive** in both directions: a JSON key `"Amount"` does not fill a tag `json:"amount"` field. And unexported fields never marshal — you get `{}` with no error. Check with the "two wrongs" habit from the Summary bug: verify against the wire, not the struct.
+> [!note] Full JSON reference: `20 - encoding/json` — tags `json:"name,omitempty"`, `json:"-"`, `json.RawMessage`, custom `MarshalJSON`.
 
 ---
 
 ## 11. Cookies
 
-HTTP is stateless — every request is independent. **Cookies** are how the server persists identity across requests: the response tells the browser to store a token, and the browser sends it back with every subsequent request.
+Stateless HTTP → cookies persist identity across requests.
 
 ```go
-// SET — on a successful login
+// SET — on login
 http.SetCookie(w, &http.Cookie{
-    Name:     "session",
-    Value:    "abc123",
-    Path:     "/",                    // which routes the cookie applies to
-    HttpOnly: true,                   // JS can't read it — XSS protection
-    SameSite: http.SameSiteLaxMode,   // CSRF protection
-    MaxAge:   3600,                   // seconds; or Expires
+    Name: "session", Value: "abc123", Path: "/", HttpOnly: true,
+    SameSite: http.SameSiteLaxMode, MaxAge: 3600, // or Expires
 })
 
-// READ — on every protected request
-c, err := r.Cookie("session")         // *http.Cookie or error
-if err == http.ErrNoCookie {          // no such cookie — treat as not logged in
-    http.Redirect(w, r, "/login", http.StatusSeeOther)
-    return
+// READ — on protected route
+c, err := r.Cookie("session") // *http.Cookie or err
+if err == http.ErrNoCookie {
+    http.Redirect(w, r, "/login", http.StatusSeeOther); return
 }
-fmt.Println(c.Value)                  // "abc123"
+fmt.Println(c.Value) // "abc123"
 ```
 
-**The security flags are not optional:**
+- `HttpOnly` — JS cannot read via `document.cookie` (XSS protection) — set on every auth cookie
+- `Secure` — HTTPS only (prod)
+- `SameSite` — `Lax` (default, CSRF defense) / `Strict` / `None` (requires `Secure`) — core CSRF defense plus `POST` rule (§7)
 
-- **`HttpOnly`** — a malicious script injected into your page cannot read the cookie via `document.cookie`. You'll set this on every auth cookie.
-- **`Secure`** — only send over HTTPS (your milestone-6 session cookie wants this in production).
-- **`SameSite`** — stops the browser sending the cookie on cross-site requests: the core CSRF defense, *in addition to* your POST-for-mutations rule (§7).
-
-**Why you need it (milestone 7):** your auth middleware (§9) will check `r.Cookie("session")` → look up the user in the DB → attach the user to `r.Context()` (§14) → `next.ServeHTTP`. The cookie is just the browser's half of the handshake; the server keeps the real session data.
-
-> [!tip] Cookies are also where the "flash message" polish idea lives: set a cookie on a failed action, read-and-delete it on the next page render, show it once. That's the milestone-5 flash-errors plan in one line.
+Auth middleware `r.Cookie("session") → DB → r.WithContext → next` (§14). Flash: set on failed POST, read+delete (`MaxAge:-1`) on next `GET` — one-time banner.
 
 ---
 
 ## 12. The HTTP Client
 
-Same package, opposite direction. The server side you know; the client is one line:
-
 ```go
 resp, err := http.Get("https://example.com")
 if err != nil { ... }
-defer resp.Body.Close()                        // ← THE leak rule
-
-fmt.Println(resp.StatusCode)                   // 200
-body, err := io.ReadAll(resp.Body)             // the response body → []byte
+defer resp.Body.Close() // ALWAYS — leaks connection otherwise (twin of defer rows.Close())
+fmt.Println(resp.StatusCode) // 200
+body, _ := io.ReadAll(resp.Body)
 ```
 
-**The four verbs:**
+One-liners:
 
 ```go
-http.Get(url)                     // GET
-http.Post(url, "application/json", body)   // POST — body is io.Reader
-http.PostForm(url, url.Values{"a": {"b"}}) // POST form-encoded
-http.Head(url)                    // GET with no response body (headers only)
+http.Get(url)
+http.Post(url, "application/json", body) // body io.Reader
+http.PostForm(url, url.Values{"a": {"b"}})
+http.Head(url) // headers only
 ```
 
-**The full control path — `http.NewRequest` + `client.Do`:**
+Full control:
 
 ```go
-// ① build the request: method, URL, body (as an io.Reader)
-req, err := http.NewRequest("POST", "http://localhost:8080/expenses/add",
+req, _ := http.NewRequest("POST", "http://localhost:8080/expenses/add",
     strings.NewReader("description=bread&amount=10000"))
 req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-req.Header.Set("User-Agent", "expense-sync/1.0")
-
-// ② do it with a custom client — ALWAYS set a timeout
-client := &http.Client{Timeout: 5 * time.Second}
-resp, err := client.Do(req)
+client := &http.Client{Timeout: 5*time.Second} // default client has NO timeout — hangs forever
+resp, _ := client.Do(req)
 ```
 
-`NewRequest` separates *building* the request from *sending* it — the step where headers and context attach.
-
-**The custom client's settings:**
-
-```go
-client := &http.Client{
-    Timeout: 5 * time.Second,          // overall deadline — the one you must set
-    Transport: &http.Transport{        // the low-level connection pool
-        MaxIdleConns:        10,
-        IdleConnTimeout:     30 * time.Second,
-        TLSClientConfig:    &tls.Config{InsecureSkipVerify: false},
-    },
-}
-```
-
-The package-level `http.Get`/`http.Post` use a default client **with no timeout** — a dead server can hang your program forever. For anything real, build a client with a `Timeout`.
-
-**One rule to own: `resp.Body` is a stream — always `defer resp.Body.Close()`.** An unclosed body leaks the connection. This is the client twin of `defer rows.Close()` from milestone 1 — same idea, same muscle.
-
-> [!note] Your verification ritual already uses the client: `curl localhost:8080/expenses` is `http.Get` in disguise; `curl -d "amount=10000" -X POST ...` is `client.Do` with a body. When a third-party API arrives (QR/prefill), this section is your door to it.
+`NewRequest` = build, `Do` = send. Always set `Client{Timeout}` for real code. Transport `MaxIdleConns`, `IdleConnTimeout`, `TLSClientConfig` for tuning.
 
 ---
 
 ## 13. TLS/HTTPS & Timeouts
 
-### TLS
-
-HTTPS is HTTP inside a TLS-encrypted tunnel. Go makes the switch trivial — the hard part is the certificate:
+**TLS:**
 
 ```go
-// one-liner form
 log.Fatal(http.ListenAndServeTLS(":443", "server.crt", "server.key", mux))
-
-// server-struct form
 srv := &http.Server{Addr: ":443", Handler: mux}
 log.Fatal(srv.ListenAndServeTLS("server.crt", "server.key"))
 ```
 
-- **Certificate files** — `server.crt` (public cert) + `server.key` (private key), usually from Let's Encrypt, a CA, or a self-signed pair for dev.
-- **HTTP/2** — automatic when TLS is on; `http.Server` enables it by default, no config.
-- **Testing locally** — generate a self-signed cert (`openssl req -x509 -newkey rsa:2048 ...`), serve HTTPS, and your browser will warn "untrusted" — expected for a self-signed cert. `InsecureSkipVerify` on the *client* side is a dev-only escape hatch, never production.
+`server.crt` (public) + `server.key` (private) from Let’s Encrypt or self-signed `openssl req -x509 -newkey rsa:2048` (browser warns untrusted for self-signed). `http.Server` enables HTTP/2 under TLS automatically.
 
-**Forcing HTTPS from an HTTP server** (redirect all traffic):
+Redirect HTTP → HTTPS:
 
 ```go
-// run the HTTP listener on :80, redirect everything to :443
 http.ListenAndServe(":80", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     http.Redirect(w, r, "https://"+r.Host+r.URL.RequestURI(), http.StatusMovedPermanently)
 }))
 ```
 
-### Timeouts — the four knobs
+**Timeouts:**
 
-| Knob | What it protects against | Typical value |
+| Timeout | Protects against | Typical |
 |---|---|---|
-| `Server.ReadTimeout` | slow/broken clients holding the connection open while "reading" | 5–10s |
-| `Server.ReadHeaderTimeout` | header-only floods (cheaper than ReadTimeout) | 5s |
-| `Server.WriteTimeout` | a handler that hangs forever | 10–30s |
-| `Server.IdleTimeout` | idle keep-alive connections squatting on resources | 60–120s |
-| `Client.Timeout` | your *outgoing* calls hanging on a dead peer | 5–10s |
+| `ReadTimeout` / `ReadHeaderTimeout` | slow client holding connection | 5-10s |
+| `WriteTimeout` | hanging handler | 10-30s |
+| `IdleTimeout` | idle keep-alive squatters | 60-120s |
+| `Client.Timeout` | dead peer on outgoing call | 5-10s |
 
 ```go
 srv := &http.Server{
-    Addr: ":8080",
-    Handler: mux,
-    ReadHeaderTimeout: 5 * time.Second,
-    ReadTimeout:       10 * time.Second,
-    WriteTimeout:      15 * time.Second,
-    IdleTimeout:       60 * time.Second,
+    Addr: ":8080", Handler: mux,
+    ReadHeaderTimeout: 5*time.Second, ReadTimeout: 10*time.Second,
+    WriteTimeout: 15*time.Second, IdleTimeout: 60*time.Second,
 }
 ```
 
-> [!warning] Without timeouts, a single client that connects and never sends anything holds a goroutine forever — and each connection is cheap, so a thousand of them still only cost memory... but every hung *handler* also blocks its goroutine. `WriteTimeout` is what stops a deadlocked handler from hanging the server's resources indefinitely.
+Without timeouts, one slow client holds a goroutine forever.
 
 ---
 
 ## 14. Context & Cancellation
 
-HTTP requests die all the time — the client closes the tab, the connection drops. The server must *know* and stop working on the dead request. That's `context.Context` (full deep dive: [[24 - Context]]).
-
-**Every request carries one:**
+Every request has a context cancelled on disconnect/timeout/shutdown:
 
 ```go
-ctx := r.Context()        // cancelled when: the client disconnects,
-                          // the timeout fires, or the server shuts down
-```
-
-**The two things context does for handlers:**
-
-1. **Cancellation-aware work.** Long operations check `ctx.Done()` — they learn the client is gone and abandon the work:
-
-```go
-func slowHandler(w http.ResponseWriter, r *http.Request) {
-    select {
-    case <-time.After(3 * time.Second):
-        fmt.Fprintln(w, "done after 3s")
-    case <-r.Context().Done():          // client left early — give up
-        return                          // no response needed, nobody's listening
-    }
+select {
+case <-time.After(3*time.Second):
+    fmt.Fprintln(w, "done")
+case <-r.Context().Done(): // client left — abandon work
+    return
 }
+rows, _ := s.db.QueryContext(r.Context(), `SELECT ...`, from, to) // DB cancels too
 ```
 
-2. **Propagating into the stack.** Database calls accept a context and stop when it's cancelled — your store's `Query`/`Exec` could take `ctx` and pass it to the SQL driver, so a dropped client cancels the query:
+Storing auth user:
 
 ```go
-rows, err := s.db.QueryContext(ctx, `SELECT ...`, from, to)   // vs plain Query
-```
-
-**Storing values (milestone 7's auth hook):** middleware attaches the authenticated user to the request's context, handlers read it back:
-
-```go
-type ctxKey string
-const userKey ctxKey = "user"
-
-// middleware (after auth check):
+type ctxKey string; const userKey ctxKey = "user"
 ctx := context.WithValue(r.Context(), userKey, user)
-next.ServeHTTP(w, r.WithContext(ctx))        // r.WithContext returns a NEW request
-
-// handler:
-user, ok := r.Context().Value(userKey).(User)  // typed back out
+next.ServeHTTP(w, r.WithContext(ctx)) // returns NEW request
+user, _ := r.Context().Value(userKey).(User)
 ```
 
-> [!warning] The value key must be your own **type** (`ctxKey`), never a plain string or a built-in — two packages using `"user"` silently collide. And never store context in a struct field — it belongs in the request, flowing downward.
-
-> [!note] The one context rule from [[24 - Context]] applies here twice over: **context flows, it does not live.** Every place a request's work passes (handler → store → driver), the context passes with it.
+> [!warning] Key must be own `type ctxKey`, not plain string — two packages using `"user"` collide. Never store context in struct — it flows down the call chain `Context` `24 - Context` rule.
 
 ---
 
 ## 15. Testing HTTP Handlers — httptest
 
-You've been testing with `curl` by hand. `httptest` automates it — same `net/http`, no real port needed ([[22 - Testing]]).
-
-**`httptest.NewRecorder`** — a fake `ResponseWriter` that captures everything:
+No real port — call handler directly.
 
 ```go
 func TestListPage(t *testing.T) {
-    st, _ := store.Open(":memory:")               // in-memory DB — no file
+    st, _ := store.Open(":memory:")
     h := web.ListPage(st)
-
     req := httptest.NewRequest("GET", "/expenses?from=2026-08-01&to=2026-08-31", nil)
-    rec := httptest.NewRecorder()                  // collects what the handler writes
-
-    h.ServeHTTP(rec, req)                          // call the handler directly
-
-    if rec.Code != http.StatusOK {
-        t.Fatalf("got %d, want %d", rec.Code, http.StatusOK)
-    }
-    if !strings.Contains(rec.Body.String(), "bread") {
-        t.Errorf("list page missing bread: %s", rec.Body.String())
-    }
+    rec := httptest.NewRecorder()
+    h.ServeHTTP(rec, req)
+    if rec.Code != http.StatusOK { t.Fatalf("got %d", rec.Code) }
+    if !strings.Contains(rec.Body.String(), "bread") { t.Error(rec.Body.String()) }
 }
 ```
 
-`NewRecorder` implements `ResponseWriter` — status into `rec.Code`, headers into `rec.Header()`, body into `rec.Body`. You assert against those.
+`rec.Code` = status, `rec.Header()` / `rec.Body.String()` = output.
 
-**`httptest.NewServer`** — a *real* running server on a random port, for full integration tests (your client code against your server code):
+`httptest.NewServer` for integration:
 
 ```go
-srv := httptest.NewServer(mux)          // starts on 127.0.0.1:random
+srv := httptest.NewServer(mux)
 defer srv.Close()
-
-resp, err := http.Get(srv.URL + "/expenses")   // the REAL client, the REAL server
+resp, _ := http.Get(srv.URL + "/expenses")
 ```
 
-**The request builder** — `httptest.NewRequest(method, target, body)` where body is an `io.Reader`:
+Request builder:
 
 ```go
 body := strings.NewReader("description=bread&amount=10000")
@@ -705,7 +512,7 @@ req := httptest.NewRequest("POST", "/expenses/add", body)
 req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 ```
 
-> [!tip] This is the milestone-6-era payoff: every handler gets a `_test.go`, and the hand-curl ritual (restart server, click browser) becomes `go test`. Note how the whole test uses only what this note taught — the handler is just an interface you call directly. That's the design working: handlers are testable because they're plain values.
+> [!tip] Handlers are plain values — `h.ServeHTTP(rec, req)` is the whole test. That’s why factory `AddExpense(st)` is testable: `store.Open(":memory:")` gives isolated DB per test.
 
 ---
 
@@ -713,85 +520,65 @@ req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 ```go
 # server
-http.ListenAndServe(":8080", mux)      # blocks forever; return = dead server
-log.Fatal(http.ListenAndServe(...))    # the canonical wrap
+http.ListenAndServe(":8080", mux)
+log.Fatal(http.ListenAndServe(...))
 srv := &http.Server{Addr, Handler, ReadTimeout, WriteTimeout, IdleTimeout}
-srv.ListenAndServeTLS("server.crt", "server.key")   # HTTPS + HTTP/2
+srv.ListenAndServeTLS("server.crt", "server.key")
 
-# handler interface
+# handler
 type Handler interface { ServeHTTP(w http.ResponseWriter, r *http.Request) }
-mux.HandleFunc(pattern, func(w, r))    # function → Handler via HandlerFunc
-mux.Handle(pattern, handler)           # Handler directly
-factories: func Name(st) http.HandlerFunc { return func(w, r) {...} }
+mux.HandleFunc(pattern, func(w, r))
+mux.Handle(pattern, handler)
+func Name(st) http.HandlerFunc { return func(w, r) {...} }
 
 # routing (Go 1.22+)
-mux.HandleFunc("GET /expenses", h)         # method + space + path
+mux.HandleFunc("GET /expenses", h)
 mux.HandleFunc("POST /expenses/add", h)
-mux.HandleFunc("GET /expenses/{id}", h)    # wildcard; r.PathValue("id")
-# specific beats wildcard beats "/" tree; wrong method → 405
-# alternatives: gorilla/mux, chi — same http.Handler interface
+mux.HandleFunc("GET /expenses/{id}", h) // r.PathValue("id")
+# precedence: specific > wildcard > "/" ; 405 vs 404
+# gorilla/mux: r.HandleFunc("/a/{id:[0-9]+}").Methods("GET") + Subrouter
+# chi: r.Get("/path", h) + r.Use() + r.Route() + chi.URLParam
 
 # request
-r.Method  r.URL.Path  r.URL.Query().Get("from")
-r.PathValue("id")        # wildcard capture
-r.FormValue("amount")    # query + body, always a string
-r.PostFormValue("x")     # body only
-r.ParseForm()            # explicit → r.Form / r.PostForm
-r.FormFile("qr")         # → (multipart.File, *FileHeader, err)
-r.Header.Get("Content-Type")
-r.Body (io.ReadCloser) — read once, io.ReadAll(r.Body)
-r.Context()              # cancelled on disconnect/timeout/shutdown
+r.Method; r.URL.Path; r.URL.Query().Get("from")
+r.PathValue("id"); r.FormValue("amount"); r.PostFormValue("x"); r.FormFile("cheque")
+r.Header.Get("Content-Type"); r.Body; r.Context()
 
 # response
-w.Write(body)            # the body; w IS an io.Writer
-w.Header().Set("K", "v") # BEFORE Write
-w.WriteHeader(500)       # before Write; else implicit 200
-http.Redirect(w, r, "/x", http.StatusSeeOther)  # 303 → browser re-GETs
-http.Error(w, "oops", 500)  # body + code in one call
+w.Header().Set("K","v") // before Write
+w.WriteHeader(500) // before Write else 200
+http.Redirect(w,r,"/x",http.StatusSeeOther)
+http.Error(w,"oops",500)
 
-# status codes
-200 OK  201 Created  204 No Content  301 Moved Permanently  303 See Other
-400 Bad Request  401 Unauthorized  403 Forbidden  404 Not Found
-405 Method Not Allowed  429 Too Many Requests  500 Internal Server Error
-
+# status: 200 201 204 301 303 400 401 403 404 405 429 500
 # middleware
-func wrap(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w, r) { /* before */; next.ServeHTTP(w, r); /* after */ })
-}
-# gate middleware returns WITHOUT calling next (auth, CORS, rate limit)
+func wrap(next http.Handler) http.Handler { return http.HandlerFunc(func(w,r){ next.ServeHTTP(w,r) }) }
+# gate returns without next (auth/CORS/rate limit)
 
 # JSON
-dec := json.NewDecoder(r.Body); dec.Decode(&req)       # in
-w.Header().Set("Content-Type", "application/json")
-json.NewEncoder(w).Encode(result)                      # out
-# tags: json:"name" — unexported fields are silently skipped
+json.NewDecoder(r.Body).Decode(&req)
+w.Header().Set("Content-Type","application/json"); json.NewEncoder(w).Encode(result)
+# json.Marshal/Unmarshal on []byte; tags json:"name" — unexported → {}
 
 # cookies
-http.SetCookie(w, &http.Cookie{Name, Value, Path, HttpOnly, Secure, SameSite, MaxAge})
-c, err := r.Cookie("session")    # err == http.ErrNoCookie when absent
+http.SetCookie(w, &http.Cookie{Name,Value,Path,HttpOnly,Secure,SameSite,MaxAge})
+c, err := r.Cookie("session") // ErrNoCookie
 
 # client
-resp, err := http.Get(url)          # defer resp.Body.Close() ALWAYS
-http.Post(url, ct, body)  http.PostForm(url, url.Values{...})
-req, _ := http.NewRequest(method, url, body)   # headers attach here
-client := &http.Client{Timeout: 5 * time.Second}
-resp, err := client.Do(req)
-io.ReadAll(resp.Body)              # the response body
+resp, _ := http.Get(url); defer resp.Body.Close()
+req, _ := http.NewRequest(method, url, body); client := &http.Client{Timeout:5*time.Second}; client.Do(req)
 
 # context
-ctx := r.Context()                 # Done() when client leaves
-r.WithContext(ctx)                 # returns a NEW request
-r.Context().Value(key)             # key = your own type, never a string
-db.QueryContext(ctx, ...)          # cancel-aware SQL
+ctx := r.Context(); r.WithContext(ctx); r.Context().Value(key); db.QueryContext(ctx, ...)
+# key = type ctxKey string, never string
 
 # testing
-rec := httptest.NewRecorder(); h.ServeHTTP(rec, req)
-rec.Code  rec.Header()  rec.Body.String()
-httptest.NewRequest(method, target, body)
-srv := httptest.NewServer(mux); defer srv.Close(); http.Get(srv.URL + "/x")
+rec := httptest.NewRecorder(); h.ServeHTTP(rec, req) // rec.Code/Header/Body
+httptest.NewRequest(method,target,body)
+srv := httptest.NewServer(mux); defer srv.Close()
 ```
 
-> [!practice] **Project laser.** Look at `cmd/expense/main.go` + `internal/web/handlers.go` and answer, from this note only: (1) why does `tmpl.Execute(w, data)` work without any adapter, given `w` is a `http.ResponseWriter`? (2) why does the list page's filter form use `method="get"` while the add/delete forms use `method="post"`? (3) trace `POST /expenses/delete` with a garbage id through the three-step error shape — what status would the client receive, and what would change if the missing `return` came back? (4) the delete redirect uses `http.StatusSeeOther` — what would change if the handler responded with `http.StatusOK` and printed the page instead? (5) which handler is a *gate* candidate for milestone-6 auth middleware, and where would the session cookie be read?
+> [!practice] **Project laser.** `cmd/expense/main.go` + `internal/web/handlers.go`: (1) why does `tmpl.Execute(w, data)` work with `http.ResponseWriter`? (2) why does filter form use `GET` while add/delete use `POST`? (3) trace `POST /expenses/delete` with garbage `id` through log→`http.Error`→`return` — what status and what would missing `return` do? (4) `StatusSeeOther` vs `StatusOK` + print page — what does F5 do? (5) which handler is gate for auth middleware and where is `r.Cookie("session")` read? (6) what happens if `r.Body` is read twice — `FormValue` after `io.ReadAll`?
 
 ---
 

@@ -1,5 +1,24 @@
 # Go (Golang)
 
+> [!info] **Roadmap 2026-08-28 → 2026-12-31 — Hybrid Profit Path** (4 months, today 2026-08-28)
+> **Goal:** Finish `Golang 20-26` + `Auth 00-20` (hybrid) + ship `quicknotes` separate project (`notes` + `url/tags` + `status draft/active/archived`) + retrofit `expense-tracker` M7+M8, deploy both.
+> **Rhythm:** 3-4h/day — morning 1 note (theory) + afternoon 1 bite (bench). `go vet` + `httptest` after each bite. `§§ - About Auth.md: Hybrid Learning Path` is the execution order (files stay `NN` stable).
+
+## 0. Roadmap 2026-08-28 → 2026-12-31
+
+| Phase                      | Dates                    | Focus                                                                                                                                                                                                                                     | Deliverable                                                                                                                                                                            |
+| -------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Phase 1 — Core Lab**     | **Aug 28 → Sep 10 (2w)** | `Auth 00 Overview` + `01 Passwords`+ `02 Sessions` + `13 Storage` + `06 Middleware` + `14 Validation` → scaffold `~/Documents/Developer/quicknotes` (`notes` + `url/tags` + `status`)                                                     | `POST /signup` → `bcrypt` `01 - Passwords` → `Set-Cookie(HttpOnly SameSite:Lax)` `02 - Sessions` → `RequireAuth` `06 - Middleware` → `WHERE user_id=?` `13 - Storage` works. Next `02` |
+| **Phase 2 — Hardening**    | **Sep 11 → Sep 24 (2w)** | `Auth 07 CSRF` + `08 XSS` + `09 RBAC` + `11 Rate Limit` + `15 Testing` + `16 Frontend` while building `quicknotes` CRUD `POST /notes/add` → `GET /notes?status=&q=` → `POST /notes/delete` with `AND user_id=?`                           | `quicknotes` shippable, `go test -race` green, flash one-time `MaxAge:-1` `19 - net:http.md:492`                                                                                       |
+| **Phase 3 — Retrofit**     | **Sep 25 → Sep 28 (3d)** | Apply lab template to `expense-tracker` `feature/gemini 9113d57`: `ALTER TABLE expenses ADD COLUMN user_id`, `users`/`sessions` tables, wrap `GET /expenses` + `POST /expenses/*` in `RequireAuth` `cmd/expense/main.go:21`               | `expense-tracker` `01 - Milestones.md:11` M7 ✅ DONE, 2 users isolation proven `sqlite3`                                                                                                |
+| **Phase 4 — Ship**         | **Sep 29 → Oct 05 (1w)** | Polish M6 leftovers (`Source` pill `list.html:11`, `sumbit→submit`, `formatAmount`), `Auth 12 HTTPS` + `19 Headers`                                                                                                                       | Both projects `gofmt` + `go vet`, `Dockerfile` + `Fly` volume / `Neon` Postgres, public URLs, `Secure` cookie in prod                                                                  |
+| **Phase 5 — Theory Deep**  | **Oct 06 → Nov 10 (5w)** | `Golang 20 encoding/json` `← NEXT` → `21 File I/O` → `22 Testing` → `23 CLI` → `24 Context` interleaved with `Auth 03 JWT` → `04 OAuth 2.0` → `05 OIDC` → `17 Mobile & API` → `18 Providers` → `GET /api/notes` JSON `20 - encoding/json` | `quicknotes` + `expense-tracker` `GET /api/*` `Bearer` `19 - net:http.md:525` ready for Android/iPhone                                                                                 |
+| **Phase 6 — Senior Track** | **Nov 11 → Dec 31 (7w)** | `Golang 25 Reflection` → `26 Patterns` + `Auth 10 Email Verify` + `19 Headers` + `20 Patterns` + `Golang 24 Context`                                                                                                                      | Worker pool `12 - Goroutines.md:869`, `sync.Once` pepper, `embed` static `21 - File I/O.md`, portfolio README + `02 - Journal.md` entries through Dec                                  |
+
+> **Hybrid rule:** File numbers stay `Auth 01-20` stable; execution follows Phase 1→2→3 above, not numeric order. See `Golang/Auth/§§ - About Auth.md: Hybrid Learning Path`. Pure theory-first (21 notes before code) loses retention — hybrid pairs *immediately useful* theory with same-day bench.
+
+---
+
 ## What is it?
 
 Go is a statically typed, compiled language built at **Google in 2009** by Robert Griesemer, Rob Pike, and Ken Thompson. Designed to fix slow compiles, verbose code, and poor concurrency in existing languages.
