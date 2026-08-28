@@ -163,12 +163,12 @@ r.RemoteAddr                  // "127.0.0.1:52341" — who's calling
 
 **The four ways data arrives:**
 
-| Source | Example | How to read |
-|---|---|---|
-| URL query | `/expenses?from=2026-08-01&to=2026-08-31` | `r.URL.Query().Get("from")` |
-| URL wildcard | `/expenses/7` | `r.PathValue("id")` |
-| Form body | `POST` + `description=bread&amount=10000` | `r.FormValue("description")` |
-| File upload | multipart body (the cheque PDF) | `r.FormFile("qr")` |
+| Source       | Example                                   | How to read                  |
+| ------------ | ----------------------------------------- | ---------------------------- |
+| URL query    | `/expenses?from=2026-08-01&to=2026-08-31` | `r.URL.Query().Get("from")`  |
+| URL wildcard | `/expenses/7`                             | `r.PathValue("id")`          |
+| Form body    | `POST` + `description=bread&amount=10000` | `r.FormValue("description")` |
+| File upload  | multipart body (the cheque PDF)           | `r.FormFile("qr")`           |
 
 **Form parsing — the two layers:**
 
