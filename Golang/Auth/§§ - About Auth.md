@@ -50,104 +50,124 @@ Auth/
 │     stateless HTTP `19 - net:http.md:40`, cookies as memory,
 │     where Auth lives (web/API/mobile), threat model (OWASP top 10)
 │
-├── 01 - Passwords & Hashing.md           ✅ NEXT? (per curriculum — first deep dive)
+├── 01 - Passwords & Hashing.md           ← Phase 1 Core
 │     bcrypt (GenerateFromPassword/CompareHashAndPassword, cost, salt, adaptive),
 │     Argon2id vs bcrypt vs scrypt, pepper, timing attacks, password validation
 │     (length, TrimSpace, common-password blocklist), never log plain
 │
-├── 02 - Sessions & Cookies.md
+├── 02 - Sessions & Cookies.md            ← Phase 1 Core
 │     Set-Cookie/Cookie `19 - net:http.md:469`, attributes
 │     (Name, Value, Path, Domain, HttpOnly, Secure, SameSite Lax/Strict/None,
 │     MaxAge, Expires), session table (token PK, user_id FK, expires_at),
 │     crypto/rand 32B hex, session expiry + cleanup, cookie vs localStorage
 │
-├── 03 - JWT.md
+├── 03 - JWT.md                          ← Phase 3 Advanced (after lab works)
 │     header.payload.signature, HS256 vs RS256, base64url, claims (sub, exp, iat, iss),
 │     encoding/json `20 - encoding/json` + base64, JWT vs sessions tradeoffs,
 │     revocation (blocklist), refresh tokens, `Authorization: Bearer`
 │
-├── 04 - OAuth 2.0.md
+├── 04 - OAuth 2.0.md                    ← Phase 3 Advanced
 │     Roles (resource owner, client, auth server, resource server),
 │     grant types (authorization code + PKCE S256, client credentials, refresh),
 │     scopes, authorization code flow diagram, state param, redirect_uri validation
 │
-├── 05 - OpenID Connect.md
+├── 05 - OpenID Connect.md               ← Phase 3 Advanced
 │     ID token vs access token, openid scope, /userinfo, nonce, OIDC vs OAuth,
 │     claims (email, email_verified), discovery /.well-known/openid-configuration
 │
-├── 06 - Middleware & Context.md
+├── 06 - Middleware & Context.md         ← Phase 1 Core
 │     RequireAuth(next http.Handler) `19 - net:http.md:333`, Handler interface
 │     `19 - net:http.md:103`, HandlerFunc adapter `19 - net:http.md:117`, closure factory
 │     `04 - Functions.md:617`, r.Cookie `19 - net:http.md:479`, r.WithContext
 │     `19 - net:http.md:650`, type ctxKey string collision, onion chaining
 │
-├── 07 - CSRF.md
+├── 07 - CSRF.md                        ← Phase 2 Hardening
 │     SameSite `19 - net:http.md:492`, hidden csrf_token (uuid/crypto/rand),
 │     double-submit, state for OAuth, synchronizer token, SameSite Lax vs Strict,
 │     why POST for mutations `01 - Milestones.md:13`
 │
-├── 08 - XSS & Injection.md
+├── 08 - XSS & Injection.md             ← Phase 2 Hardening
 │     html/template auto-escape `19 - net:http.md:229`, database/sql ? placeholders
 │     `store.go:33` vs concat, TrimSpace validation `18 - Standard Library.md:218`,
 │     Content-Security-Policy, HttpOnly as XSS mitigation
 │
-├── 09 - RBAC & ABAC.md
+├── 09 - RBAC & ABAC.md                 ← Phase 2 Hardening
 │     Roles table (role CHECK admin,member), user_roles JOIN, row-level
 │     WHERE user_id=? isolation (quicknotes/expenses), RequireRole middleware,
 │     ABAC attributes (owner, status), policy decision point
 │
-├── 10 - Email Verification & Password Reset.md
+├── 10 - Email Verification & Password Reset.md  ← Phase 3 Advanced
 │     verification_tokens(token PK, user_id, type, expires_at), crypto/rand hex,
 │     one-time use, MaxAge:-1 delete, Send via net/smtp or Resend, timing
 │
-├── 11 - Rate Limiting & Brute Force.md
+├── 11 - Rate Limiting & Brute Force.md ← Phase 2 Hardening
 │     sync.Mutex `15 - Sync Primitives.md:90` counter per IP/email, 429
 │     `19 - net:http.md:274`, time.After `14 - Select.md:131`, golang.org/x/time/rate,
 │     exponential backoff, account lockout
 │
-├── 12 - HTTPS & Transport.md
+├── 12 - HTTPS & Transport.md            ← Phase 3 Production
 │     TLS ListenAndServeTLS `19 - net:http.md:96`, Secure cookie, HSTS,
 │     ReadTimeout/WriteTimeout `19 - net:http.md:592`, cert (Let's Encrypt),
 │     Secure flag in prod, HSTS preload
 │
-├── 13 - Storage & DB.md
+├── 13 - Storage & DB.md                ← Phase 1 Core
 │     users UNIQUE `06 - Maps.md:48` index, FK ON DELETE CASCADE, migrations,
 │     sql.ErrNoRows `11 - Error Handling.md:259` + errors.Is `11 - Error Handling.md:289`,
 │     Null handling `store.go:74`, transactions `sql.Tx`, INDEX idx_notes_user_status
 │
-├── 14 - Validation & Errors.md
+├── 14 - Validation & Errors.md         ← Phase 1 Core
 │     strings.TrimSpace `18 - Standard Library.md:218`, net/url.ParseRequestURI,
 │     11 - Error Handling.md:34 error interface + wrapping %w, flash cookie one-time
 │     `19 - net:http.md:465`, 400 vs 401 vs 403 `19 - net:http.md:274`
 │
-├── 15 - Testing Auth.md
+├── 15 - Testing Auth.md                ← Phase 2 Hardening
 │     httptest.NewRequest/NewRecorder/NewServer `19 - net:http.md:669`,
 │     go test -race `15 - Sync Primitives.md:90`, table-driven tests
 │     `22 - Testing.md`, helper t.Helper, cookie jar, -cover
 │
-├── 16 - Frontend Auth.md
+├── 16 - Frontend Auth.md               ← Phase 2 Hardening
 │     GET /login form enctype `03 - Lessons Learned.md:17`, POST FormValue
 │     `19 - net:http.md:155`, flash {{if .Flash}} `list.html:11`, autofocus,
 │     preserving input on error, password type="password"
 │
-├── 17 - Mobile & API Auth.md
+├── 17 - Mobile & API Auth.md           ← Phase 3 Advanced
 │     Authorization: Bearer <jwt> `19 - net:http.md:525` NewRequest header,
 │     GET /api/notes JSON `20 - encoding/json`, cookie vs token for app,
 │     refresh flow, http.Client{Timeout} `19 - net:http.md:545`
 │
-├── 18 - OAuth Providers.md
+├── 18 - OAuth Providers.md             ← Phase 3 Advanced
 │     Google/GitHub provider, state + PKCE S256, http.Client{Timeout},
 │     GEMINI_API_KEY .env pattern `gemini.go:14`, token exchange, /userinfo fetch
 │
-├── 19 - Security Headers & Hardening.md
+├── 19 - Security Headers & Hardening.md ← Phase 3 Production
 │     Content-Security-Policy, X-Frame-Options, X-Content-Type-Options,
 │     Secure+HttpOnly audit, log/slog `18 - Standard Library.md:460`, audits
 │
-└── 20 - Patterns & Idioms.md
+└── 20 - Patterns & Idioms.md           ← Phase 3 Production
       Factory Auth(st) `04 - Functions.md:617`, functional options
       `17 - Packages & Modules.md`, sync.Once for pepper load `15 - Sync Primitives.md:163`,
       worker pool for email send `12 - Goroutines.md:869`, embed for static
 ```
+
+## Hybrid Learning Path — Most Useful + Practical + Theoretical Profit (Recommended Execution Order)
+
+**Why hybrid:** `§§ - About Golang.md` pure theory-first worked for Golang 01-19 because each note had its own bench. Auth’s 21 notes converge on *one* bench (`quicknotes` `notes` + `url/tags` + `status`). Reading all 21 before code = 4 weeks, 30% retention. Building cold = cargo-cult. Hybrid pairs *immediately useful* theory with same-day code — 70% retention, shippable in 12 days.
+
+**Execution order (file numbers stay stable for links; follow this path, not numeric order):**
+
+**Phase 1 — Core Lab (Days 1-6, 5 notes → shippable auth):**
+`00 Overview` → `01 Passwords` → `02 Sessions & Cookies` → `13 Storage & DB` → `06 Middleware & Context` → `14 Validation & Errors`
+*Bench after Phase 1:* `POST /signup`/`POST /login`/`RequireAuth`/`WHERE user_id=?` works. You can already retrofit `expense-tracker` M7.
+
+**Phase 2 — Hardening While Building CRUD (Days 7-12, 6 notes):**
+`07 CSRF` → `08 XSS` → `09 RBAC` → `11 Rate Limiting` → `15 Testing` → `16 Frontend Auth`
+*Bench:* `POST /notes/add` + `status/tags/url` CRUD with `AND user_id=?` guard, `SameSite` + token, `html/template` escape, `RequireRole`, `429` + `httptest`.
+
+**Phase 3 — Advanced Theory (Days 13+, after lab is green):**
+`03 JWT` (needs `20 - encoding/json` `← NEXT`) → `04 OAuth 2.0` → `05 OIDC` → `17 Mobile & API` → `18 OAuth Providers` → `10 Email Verification` → `12 HTTPS` → `19 Headers` → `20 Patterns`
+*Bench:* `Bearer` API for future Android/iPhone, `Sign in with Google`.
+
+> **File numbers never change — only this path changes.** If you prefer sequential numeric order, ignore this section. Hybrid is the profit path for your 2-3 week `quicknotes` goal.
 
 # Prompts
 
@@ -212,23 +232,26 @@ When a new session starts, the user pastes a session summary. The assistant shou
 
 ### Current State
 
-- Topics **00 Overview planned** — this file is the bootstrap. Next: **01 - Passwords & Hashing.md** (bcrypt deep dive, first hands-on bench).
+- Topics **00 Overview planned**, **01 Passwords & Hashing ✅ DONE (2026-08-28)** — hybrid Phase 1 started. Next: **02 - Sessions & Cookies.md** (Set-Cookie + sessions table bench).
 - Vault location: `~/Documents/Learning/Golang/Auth/` — companion to `~/Documents/Learning/Golang/` (01-19 DONE). Auth vault is `00-20` (21 notes inc Overview).
-- Pending lab: `~/Documents/Developer/go-auth-crud-lab` / `quicknotes` (DB + detailed auth + CRUD) will be the proving bench for every Auth note (mirrors `expense-tracker` shape `internal/store` + `internal/web` + `web/templates` + `web/static`).
+- Pending lab: `~/Documents/Developer/quicknotes` separate project (DB + detailed auth + CRUD, `notes` + `url/tags` + `status draft/active/archived`) will be the proving bench for every Auth note (mirrors `expense-tracker` shape `internal/store` + `internal/web` + `web/templates` + `web/static`). Lab is **separate project**, not lab copy.
 - Naming: `NN - Topic.md` zero-padded, `§§ - About Auth.md` is the index — same as `§§ - About Golang.md`.
+- **2026-08-28 Restructure — Hybrid Path chosen:** user wants maximum *useful + practical + theoretical* profit. Pure theory-first (21 notes before code) loses retention. Pure build-first loses security depth. **Hybrid interleaving adopted** — see `## Hybrid Learning Path` below. File numbers stay stable (`01` is still `Passwords`), but **execution order** is now phased (Core → Build → Harden → Advanced). This file is the restructured index.
 - Pending follow-ups, confirmed with user:
   - Vault location Option A inside `Golang/Auth/` ✅ chosen
-  - Depth: very deep, vault examples, 22 notes fully — only `§§ - About Auth.md` for now, user will go one-by-one later
-  - Lab decision: `QuickNotes+` (notes + url/tags + status `draft/active/archived`) as separate project, not lab — `tags TEXT` single column recommended vs normalized JOIN trade-off still open (user to confirm)
+  - Depth: very deep, vault examples, 22 notes fully — only `§§ - About Auth.md` for now, user will go one-by-one later (now via hybrid path)
+  - Project decision: `QuickNotes+` separate project ✅ chosen — `tags TEXT` single column recommended vs normalized JOIN trade-off still open (user to confirm)
+  - Hybrid profit discussion 2026-08-28: core → build → deepen yields higher realized profit than all-theory-first for 2-3 week goal
+  - 2026-08-28: `01 - Passwords & Hashing.md` created — 14 sections, bcrypt deep dive, cost/pepper/validation, project tie-in to quicknotes + expense-tracker retrofit
 
 ---
 
 ### Curriculum Structure
 
-The full Auth learning path I am following:
+The full Auth learning path I am following (files stay `NN` stable; **execution follows Hybrid Path below**):
 
 ```
-Auth/
+Auth/  — file numbers (stable for Obsidian links)
 ├── 00 - Overview.md                 ← NEXT (after this file)
 ├── 01 - Passwords & Hashing.md
 ├── 02 - Sessions & Cookies.md
@@ -250,6 +273,10 @@ Auth/
 ├── 18 - OAuth Providers.md
 ├── 19 - Security Headers & Hardening.md
 └── 20 - Patterns & Idioms.md
+
+Hybrid execution order (most useful + practical + theoretical profit):
+Phase 1 — Core Lab (days 1-6) → Phase 2 — Hardening (days 7-12) → Phase 3 — Advanced Theory (days 13+)
+See ## Hybrid Learning Path for the phased sequence.
 ```
 
 ---
