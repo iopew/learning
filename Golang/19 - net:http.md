@@ -125,12 +125,12 @@ r.Context()                 // cancelled on disconnect (§14)
 r.RemoteAddr                // "127.0.0.1:52341"
 ```
 
-| Source | Example | Read |
-|---|---|---|
-| URL query | `/expenses?from=2026-08-01` | `r.URL.Query().Get("from")` |
-| Wildcard | `/expenses/7` | `r.PathValue("id")` |
+| Source    | Example                          | Read                         |
+| --------- | -------------------------------- | ---------------------------- |
+| URL query | `/expenses?from=2026-08-01`      | `r.URL.Query().Get("from")`  |
+| Wildcard  | `/expenses/7`                    | `r.PathValue("id")`          |
 | Form body | `description=bread&amount=10000` | `r.FormValue("description")` |
-| File | multipart cheque PDF | `r.FormFile("cheque")` |
+| File      | multipart cheque PDF             | `r.FormFile("cheque")`       |
 
 - `r.FormValue` calls `r.ParseForm()` internally, merges `r.Form` + `r.PostForm`, returns first hit.
 - `r.Body` vs `FormValue` — read one, not both. Once `Body` consumed, `FormValue` sees `""`. JSON uses `r.Body` (§10), forms use `FormValue`.
