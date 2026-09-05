@@ -1,5 +1,7 @@
 # Auth (Authentication & Authorization)
 
+> **Series:** Auth **Tags:** #auth #security #web #owasp #csrf #xss #sqli #ssrf #cors #headers #ratelimit #validation #deserialization #idor #authn #authorization #session #cookies #golang #cryptography **Level:** Beginner → Intermediate
+
 ## What is it?
 
 Authentication (**AuthN**) is **who you are** — proving identity (email + password, session cookie, JWT, OAuth). Authorization (**AuthZ**) is **what you can do** — whether that identity may read/write a resource (owner check `WHERE user_id=?`, roles `admin/member`, CSRF gate). Go implements both with stdlib `net/http` + `database/sql` + `golang.org/x/crypto/bcrypt` — no framework needed.
@@ -147,6 +149,28 @@ Auth/
       Factory Auth(st) `04 - Functions.md:617`, functional options
       `17 - Packages & Modules.md`, sync.Once for pepper load `15 - Sync Primitives.md:163`,
       worker pool for email send `12 - Goroutines.md:869`, embed for static
+├── 21 - CSRF (Cross-Site Request Forgery).md          ← Phase 2 Harden (separate, short)
+│     Attacker site POSTs as you, SameSite Lax/Strict, synchronizer token, double-submit
+├── 22 - XSS (Stored, Reflected, DOM-based).md        ← Phase 2 Harden (separate, short)
+│     html/template auto-escape, ? placeholders, CSP, HttpOnly
+├── 23 - CORS (and common misconfigurations).md       ← Phase 2 Harden (separate, short)
+│     Origin/Access-Control-Allow-Origin, preflight, credentials + SameSite
+├── 24 - Security Headers (CSP, HSTS, X-Frame-Options, SameSite).md  ← Phase 3 Production (separate, short)
+│     CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Secure+HttpOnly audit
+├── 25 - Rate Limiting / Brute-force protection.md    ← Phase 2 Harden (separate, short)
+│     429, sync.Mutex, golang.org/x/time/rate, lockout
+├── 26 - Input Validation & Sanitization.md           ← Phase 2 Harden (separate, short)
+│     TrimSpace, regexp, validator, allow-list, 400 vs 422
+├── 27 - SQL Injection.md                             ← Phase 3 Injection (separate, short)
+│     ? placeholders vs concat, UNION, blind, sql.Tx
+├── 28 - SSRF (Server-Side Request Forgery).md        ← Phase 3 Injection (separate, short)
+│     SSRF via fetch URL, allow-list, no localhost, no metadata IP
+├── 29 - Insecure Deserialization.md                   ← Phase 3 Injection (separate, short)
+│     json.Unmarshal to any, type confusion, gadget chains
+├── 30 - IDOR (Insecure Direct Object Reference).md   ← Phase 3 Injection (separate, short)
+│     WHERE id=? vs WHERE id=? AND user_id=?, horizontal vs vertical
+└── 31 - Authentication vs Authorization (Sessions, JWT, OAuth basics).md  ← Capstone (separate, short) at end
+      AuthN who you are vs AuthZ what you can do, session vs JWT vs OAuth, RBAC vs ABAC, when to use which
 ```
 
 ## Hybrid Learning Path — Most Useful + Practical + Theoretical Profit (Recommended Execution Order)
@@ -232,17 +256,19 @@ When a new session starts, the user pastes a session summary. The assistant shou
 
 ### Current State
 
-- Topics **00 Overview planned**, **01 Passwords & Hashing ✅ DONE (2026-08-28)** — hybrid Phase 1 started. Next: **02 - Sessions & Cookies.md** (Set-Cookie + sessions table bench).
-- Vault location: `~/Documents/Learning/Golang/Auth/` — companion to `~/Documents/Learning/Golang/` (01-19 DONE). Auth vault is `00-20` (21 notes inc Overview).
+- Topics **00 Overview planned**, **01 Passwords & Hashing ✅ DONE (2026-08-28)** — you are now studying 01 (447 lines, 14 sections). Next: **02 - Sessions & Cookies.md** (Set-Cookie + sessions table bench) per Hybrid Path. `31` placed **at end** as capstone per your 2026-09-02 call.
+- Vault location: `~/Documents/Learning/Golang/Auth/` — companion to `~/Documents/Learning/Golang/` (01-19 DONE). Auth vault is `00-31` (32 notes inc Overview) after 2026-09-02 restructure (21-31 appended as separate short topics, grouped, 31 at end).
 - Pending lab: `~/Documents/Developer/quicknotes` separate project (DB + detailed auth + CRUD, `notes` + `url/tags` + `status draft/active/archived`) will be the proving bench for every Auth note (mirrors `expense-tracker` shape `internal/store` + `internal/web` + `web/templates` + `web/static`). Lab is **separate project**, not lab copy.
 - Naming: `NN - Topic.md` zero-padded, `§§ - About Auth.md` is the index — same as `§§ - About Golang.md`.
 - **2026-08-28 Restructure — Hybrid Path chosen:** user wants maximum *useful + practical + theoretical* profit. Pure theory-first (21 notes before code) loses retention. Pure build-first loses security depth. **Hybrid interleaving adopted** — see `## Hybrid Learning Path` below. File numbers stay stable (`01` is still `Passwords`), but **execution order** is now phased (Core → Build → Harden → Advanced). This file is the restructured index.
+- **2026-09-02 Restructure — Separate short topics:** you asked *no sub-bullets, separate topics, short & concise* → `21-31` added as 11 separate top-level notes (grouped Harden/Injection/Capstone), each short vs `01` deep. `31` at end per your *place 31 at the end* while studying `01` now. Tags added to `§§` now and per-note later.
 - Pending follow-ups, confirmed with user:
   - Vault location Option A inside `Golang/Auth/` ✅ chosen
-  - Depth: very deep, vault examples, 22 notes fully — only `§§ - About Auth.md` for now, user will go one-by-one later (now via hybrid path)
+  - Depth: very deep, vault examples, `21-31` very deep but **short** (5-6 sections each) — only `§§ - About Auth.md` for now, you will go one-by-one later (now studying `01`)
   - Project decision: `QuickNotes+` separate project ✅ chosen — `tags TEXT` single column recommended vs normalized JOIN trade-off still open (user to confirm)
   - Hybrid profit discussion 2026-08-28: core → build → deepen yields higher realized profit than all-theory-first for 2-3 week goal
   - 2026-08-28: `01 - Passwords & Hashing.md` created — 14 sections, bcrypt deep dive, cost/pepper/validation, project tie-in to quicknotes + expense-tracker retrofit
+  - 2026-09-02: Curriculum extended to `00-31`, `21-31` grouped, `31` capstone at end, tags `#csrf` etc. added to `§§`.
 
 ---
 
@@ -272,11 +298,23 @@ Auth/  — file numbers (stable for Obsidian links)
 ├── 17 - Mobile & API Auth.md
 ├── 18 - OAuth Providers.md
 ├── 19 - Security Headers & Hardening.md
-└── 20 - Patterns & Idioms.md
+├── 20 - Patterns & Idioms.md
+├── 21 - CSRF (Cross-Site Request Forgery).md
+├── 22 - XSS (Stored, Reflected, DOM-based).md
+├── 23 - CORS (and common misconfigurations).md
+├── 24 - Security Headers (CSP, HSTS, X-Frame-Options, SameSite).md
+├── 25 - Rate Limiting / Brute-force protection.md
+├── 26 - Input Validation & Sanitization.md
+├── 27 - SQL Injection.md
+├── 28 - SSRF (Server-Side Request Forgery).md
+├── 29 - Insecure Deserialization.md
+├── 30 - IDOR (Insecure Direct Object Reference).md
+└── 31 - Authentication vs Authorization (Sessions, JWT, OAuth basics).md
 
 Hybrid execution order (most useful + practical + theoretical profit):
 Phase 1 — Core Lab (days 1-6) → Phase 2 — Hardening (days 7-12) → Phase 3 — Advanced Theory (days 13+)
 See ## Hybrid Learning Path for the phased sequence.
+Note: 21-31 are separate short topics (grouped) with 31 capstone at end per your 2026-09-02 call — you are now studying 01, so 31 stays at end.
 ```
 
 ---
@@ -326,6 +364,28 @@ When I say “let’s explore topic X”, create a **full, detailed Obsidian not
 **19 - Security Headers & Hardening.md** `Content-Security-Policy default-src 'self'`, `X-Frame-Options DENY`, `X-Content-Type-Options nosniff`, `Referrer-Policy strict-origin`, `Permissions-Policy`, `Secure`+`HttpOnly` audit checklist, `log/slog` `18 - Standard Library.md:460` structured `slog.Info("login", "user", email)`, dependency audit `go list -m all`, `govulncheck`
 
 **20 - Patterns & Idioms.md** Factory `Auth(st)` `04 - Functions.md:617` vs functional options `17 - Packages & Modules.md`, `sync.Once` for pepper/config load `15 - Sync Primitives.md:163`, `type ctxKey string` `19 - net:http.md:649` never string key, worker pool for email send `12 - Goroutines.md:869`, `embed` for `web/static` `21 - File I/O.md`, `go:generate` for mocks
+
+**21 - CSRF (Cross-Site Request Forgery).md** Attacker site POSTs as you, `SameSite=Lax/Strict`, synchronizer token `uuid/crypto/rand` hidden `<input name="csrf">`, double-submit, `state` for OAuth, `Origin/Referer` checks
+
+**22 - XSS (Stored, Reflected, DOM-based).md** Types, `html/template` auto-escape vs `template.HTML` danger, `Content-Security-Policy`, `HttpOnly`
+
+**23 - CORS (and common misconfigurations).md** `Origin`, `Access-Control-Allow-Origin`, preflight `OPTIONS`, `Allow-Credentials` + `SameSite` trap, `*` with credentials bug
+
+**24 - Security Headers (CSP, HSTS, X-Frame-Options, SameSite).md** `Content-Security-Policy`, `Strict-Transport-Security`, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`
+
+**25 - Rate Limiting / Brute-force protection.md** `429`, `sync.Mutex` counters, `golang.org/x/time/rate`, `Retry-After`, lockout
+
+**26 - Input Validation & Sanitization.md** `TrimSpace`, `regexp`, allow-list vs block-list, `validator` tag, `400 vs 422`
+
+**27 - SQL Injection.md** `?` placeholders `store.go:33` vs concat, `UNION`/`OR 1=1` blind, prepared statements, `sql.Tx`
+
+**28 - SSRF (Server-Side Request Forgery).md** `http.Get(userURL)` fetch, allow-list host, no `localhost`/`169.254.169.254` metadata IP, `http.Client{Timeout}` + `MaxBytesReader`
+
+**29 - Insecure Deserialization.md** `json.Unmarshal` to `any`/`map[string]any`, `json.RawMessage`, gadget chains, type confusion, `DisallowUnknownFields`
+
+**30 - IDOR (Insecure Direct Object Reference).md** `WHERE id=?` vs `WHERE id=? AND user_id=?`, horizontal vs vertical, `RequireAuth` + `RequireRole`, `404` vs `403` leaking existence
+
+**31 - Authentication vs Authorization (Sessions, JWT, OAuth basics).md** AuthN who you are vs AuthZ what you can do, session cookie `02` vs `JWT` `03` vs `OAuth` `04/05`, `RBAC` vs `ABAC`, `WHERE user_id=?` vs `RequireRole`, when to use which — capstone at end while you study `01` now
 
 ---
 
