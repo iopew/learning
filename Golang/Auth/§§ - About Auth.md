@@ -8,14 +8,14 @@ Authentication (**AuthN**) is **who you are** — proving identity (email + pass
 
 ## Why use it?
 
-| Strength | Detail |
-|---|---|
-| Sessions are revocable | DB row `sessions(token PK, user_id FK, expires_at)` — logout = `DELETE` + `MaxAge:-1`, unlike JWT which lives until `exp` |
-| Cookie `HttpOnly` + `SameSite` | Browser enforces XSS/CSRF defenses automatically — no JS can read `HttpOnly` `19 - net:http.md:490` |
-| Middleware is composition | `RequireAuth(next http.Handler) http.Handler` `19 - net:http.md:333` wraps any handler — onion `next.ServeHTTP` chain, zero duplication |
-| Bcrypt is adaptive | Cost factor grows with hardware — `GenerateFromPassword` cost 12 today, still safe in 2030 |
-| Single `user_id` guard | One `AND user_id=?` on every query gives per-user isolation — same pattern for `expenses` and `notes` |
-| Stdlib only | No `gin/echo` — `http.Cookie`, `context.WithValue`, `crypto/rand`, `html/template` auto-escape cover the whole flow |
+| Strength                       | Detail                                                                                                                                  |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Sessions are revocable         | DB row `sessions(token PK, user_id FK, expires_at)` — logout = `DELETE` + `MaxAge:-1`, unlike JWT which lives until `exp`               |
+| Cookie `HttpOnly` + `SameSite` | Browser enforces XSS/CSRF defenses automatically — no JS can read `HttpOnly` `19 - net:http.md:490`                                     |
+| Middleware is composition      | `RequireAuth(next http.Handler) http.Handler` `19 - net:http.md:333` wraps any handler — onion `next.ServeHTTP` chain, zero duplication |
+| Bcrypt is adaptive             | Cost factor grows with hardware — `GenerateFromPassword` cost 12 today, still safe in 2030                                              |
+| Single `user_id` guard         | One `AND user_id=?` on every query gives per-user isolation — same pattern for `expenses` and `notes`                                   |
+| Stdlib only                    | No `gin/echo` — `http.Cookie`, `context.WithValue`, `crypto/rand`, `html/template` auto-escape cover the whole flow                     |
 
 ---
 
