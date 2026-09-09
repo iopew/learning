@@ -14,13 +14,12 @@
 - [[#6. Comparing — Constant-Time and Why]]
 - [[#7. Pepper — Environment Secret on Top]]
 - [[#8. Validation Before Hashing]]
-- [[#9. AuthN vs AuthZ in One Glance (Sessions vs JWT) — Deeper Link to 31]]
-- [[#10. Never Log Plain — The Error Handling Shape]]
-- [[#11. Argon2id vs bcrypt vs scrypt — When to Switch]]
-- [[#12. Cost Tuning — Bench on Your Machine]]
-- [[#13. Common Pitfalls — The Bug Party]]
-- [[#14. Project Tie-In — quicknotes + expense-tracker]]
-- [[#15. Quick Reference Cheatsheet]]
+- [[#9. Never Log Plain — The Error Handling Shape]]
+- [[#10. Argon2id vs bcrypt vs scrypt — When to Switch]]
+- [[#11. Cost Tuning — Bench on Your Machine]]
+- [[#12. Common Pitfalls — The Bug Party]]
+- [[#13. Project Tie-In — quicknotes + expense-tracker]]
+- [[#14. Quick Reference Cheatsheet]]
 
 ---
 
@@ -31,10 +30,12 @@ Storing `password = "secret123"` in `users.password_hash` means a single `SELECT
 Hashing is **one-way**: `password → hash` is cheap, `hash → password` is infeasible. Go checks by hashing the candidate the same way and comparing hashes, not by decrypting.
 
 ```go
-// ❌ NEVER
+import "golang.org/x/crypto/bcrypt"
+
+// ❌ NEVER — plain password leaked on any SELECT dump
 db.Exec("INSERT INTO users (email, password) VALUES (?, ?)", email, password)
 
-// ✅ ALWAYS
+// ✅ ALWAYS — store hash, never plain
 hash, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 db.Exec("INSERT INTO users (email, password_hash) VALUES (?, ?)", email, string(hash))
 ```
@@ -72,6 +73,14 @@ fmt.Println(err) // crypto/bcrypt: hashedPassword is not the hash of the given p
 ### Minimal signup/login handlers (mirrors `quicknotes` lab)
 
 ```go
+import (
+    "net/http"
+    "net/url"
+    "strings"
+
+    "golang.org/x/crypto/bcrypt"
+)
+
 func Signup(st *store.Store) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         email := strings.TrimSpace(r.FormValue("email"))
@@ -137,6 +146,8 @@ func Login(st *store.Store) http.HandlerFunc {
 | 14 | ~1.2s | Very strong | High-value apps |
 
 ```go
+import "golang.org/x/crypto/bcrypt"
+
 bcrypt.DefaultCost // 10
 bcrypt.MinCost     // 4
 bcrypt.MaxCost     // 31
@@ -172,6 +183,12 @@ A **salt** is 16 random bytes prepended before hashing. Without salt, two users 
 bcrypt **generates a fresh salt automatically** on every `GenerateFromPassword` call — you never supply it.
 
 ```go
+import (
+    "fmt"
+
+    "golang.org/x/crypto/bcrypt"
+)
+
 h1, _ := bcrypt.GenerateFromPassword([]byte("secret"), 12)
 h2, _ := bcrypt.GenerateFromPassword([]byte("secret"), 12)
 fmt.Println(string(h1) == string(h2)) // false — different salts, different hashes
@@ -196,6 +213,12 @@ $2a$12$L0eb1p6aGe9G8a2rKg3qOeXyZ9q8aBcDeFgHiJkLmNoPqRsTuVwXy
 Full length is always **60 chars** for bcrypt:
 
 ```go
+import (
+    "fmt"
+
+    "golang.org/x/crypto/bcrypt"
+)
+
 hash, _ := bcrypt.GenerateFromPassword([]byte("secret"), 12)
 fmt.Println(len(hash)) // 60
 fmt.Println(string(hash[:4])) // $2a$
@@ -213,6 +236,8 @@ cost, _ := bcrypt.Cost(hash) // 12
 `CompareHashAndPassword` is **constant-time** — it takes the same time for `wrong` vs `almost-right` candidates. A naive `hash == hash` leaks timing: attacker measures response time to guess how many prefix chars are correct.
 
 ```go
+import "golang.org/x/crypto/bcrypt"
+
 // ❌ Naive — leaks timing, plus you must hash candidate yourself
 candidateHash, _ := bcrypt.GenerateFromPassword([]byte(candidate), 12)
 if string(candidateHash) == string(storedHash) { ... } // wrong — different salts → never equal, plus timing leak
@@ -232,6 +257,14 @@ if err := bcrypt.CompareHashAndPassword(storedHash, []byte(candidate)); err != n
 **Salt** is per-password (stored in hash, public). **Pepper** is per-application (one secret for all passwords, *not* stored in DB, lives in env `GEMINI_API_KEY` pattern `gemini.go:14`).
 
 ```go
+import (
+    "crypto/hmac"
+    "crypto/sha256"
+    "os"
+
+    "golang.org/x/crypto/bcrypt"
+)
+
 pepper := os.Getenv("PEPPER") // 32 random bytes hex, set via fly secrets / .env gitignored
 
 func hashWithPepper(password, pepper string) ([]byte, error) {
@@ -263,15 +296,21 @@ func compareWithPepper(hash []byte, password, pepper string) error {
 Bcrypt has hard limits — validate *before* calling it.
 
 ```go
+import (
+    "errors"
+    "strings"
+)
+
 func validatePassword(pw string) error {
     if len(pw) < 8 {
         return errors.New("password must be at least 8 characters")
     }
     if len(pw) > 72 {
-        return errors.New("password must be at most 72 characters") // bcrypt limit
+        return errors.New("password must be at most 72 characters") // bcrypt limit 72 bytes
     }
     if strings.TrimSpace(pw) != pw {
-        // optional — you may allow leading/trailing spaces (they are valid), but many apps reject to avoid copy-paste traps
+        // optional — return errors.New("password must not start/end with spaces") if you want to reject
+        // many apps allow spaces (they are valid), but reject to avoid copy-paste traps
     }
     // common-password blocklist (10k most common) — see note below
     if commonPasswords[pw] {
@@ -288,10 +327,17 @@ func validatePassword(pw string) error {
 Common-password blocklist — keep a `map[string]struct{}` `06 - Maps.md:472` set of 10k entries (haveibeenpwned top 10k), loaded once with `sync.Once` `15 - Sync Primitives.md:163` or `embed` `21 - File I/O.md`:
 
 ```go
+import (
+    _ "embed"
+    "strings"
+    "sync"
+)
+
 //go:embed common_passwords.txt
 var commonRaw string
 var commonPasswords map[string]struct{}
 var once sync.Once
+
 func isCommon(pw string) bool {
     once.Do(func() {
         commonPasswords = make(map[string]struct{}, 10000)
@@ -306,28 +352,22 @@ func isCommon(pw string) bool {
 
 ---
 
-## 9. AuthN vs AuthZ in One Glance (Sessions vs JWT) — Deeper Link to [[31 - Authentication vs Authorization (Sessions, JWT, OAuth basics)]]
-
-You are on `01` now — this is the capstone at a glance so `01` is self-contained before `31` (at end) exists. Full `31 - Authentication vs Authorization` is the separate short note at the end.
-
-- **AuthN (Authentication) = who you are:** `email + password` → `bcrypt.CompareHashAndPassword` `01 - Passwords` → `session cookie` `02 - Sessions & Cookies` `19 - net:http.md:469` or `JWT` `03 - JWT` `Authorization: Bearer`. Answers *“Are you Alice?”* — this `01` is AuthN.
-- **AuthZ (Authorization) = what you can do:** `WHERE user_id=?` `13 - Storage & DB` `store.go:48`, `roles admin/member` `09 - RBAC`, `CSRF gate` `21 - CSRF`. Answers *“May Alice delete note 5?”* → `WHERE id=? AND user_id=?` `30 - IDOR` vs `WHERE id=?` leak → horizontal vs vertical. `RequireAuth` `06 - Middleware` is AuthN gate, `RequireRole` is AuthZ gate.
-- **Session vs JWT:** `session` = server memory `sessions(token PK)` `02` — revocable `DELETE + MaxAge:-1`; `JWT` = self-carried `header.payload.signature` `03` — stateless but needs blocklist. `quicknotes` lab uses `session` first, `Bearer` later for `17 - Mobile & API`.
-- **When AuthN vs AuthZ matters for `01`:** `01` validates `len(pw)<8` → `400 Bad Request` `14 - Validation` (not `401` AuthN), and never logs `password` `10 - Never Log Plain` — AuthZ checks `user_id` only after AuthN succeeded.
-
-> [!note] Full `AuthN vs AuthZ` (sessions vs JWT vs OAuth, RBAC vs ABAC, when to use which) lives in `[[31 - Authentication vs Authorization (Sessions, JWT, OAuth basics)]]` — separate short topic at the end, not here. This `§9` is just the one-glance map.
-
----
-
-## 10. Never Log Plain — The Error Handling Shape
+## 9. Never Log Plain — The Error Handling Shape
 
 ```go
+import (
+    "fmt"
+    "log"
+    "net/http"
+    "net/url"
+)
+
 // ❌ Leaks to logs, terminal, and maybe to client via ?err=
-fmt.Printf("login failed for %s password %s: %v\n", email, password, err)
+log.Printf("login failed for %s password %s: %v", email, password, err)
 http.Redirect(w, r, "/login?err="+url.QueryEscape(password), http.StatusSeeOther)
 
 // ✅ Only log email + error, never password; client gets generic message
-fmt.Println("login failed for", email, ":", err) // 11 - Error Handling.md:34
+log.Printf("login failed for %s: %v", email, err) // log to stderr with timestamp 18 - Standard Library.md:87
 http.Redirect(w, r, "/login?err="+url.QueryEscape("invalid credentials"), http.StatusSeeOther)
 
 // Store: TEXT NOT NULL `password_hash`, never `password`
@@ -342,7 +382,7 @@ if err != nil {
 
 ---
 
-## 11. Argon2id vs bcrypt vs scrypt — When to Switch
+## 10. Argon2id vs bcrypt vs scrypt — When to Switch
 
 | Algorithm | Type | Memory-hard | Go package | Hash length | When to use |
 |---|---|---|---|---|---|
@@ -352,7 +392,12 @@ if err != nil {
 
 ```go
 // Argon2id — for reference, NOT needed for lab (cost tuned differently)
-import "golang.org/x/crypto/argon2"
+import (
+    "crypto/rand"
+
+    "golang.org/x/crypto/argon2"
+)
+
 salt := make([]byte, 16)
 rand.Read(salt)
 hash := argon2.IDKey([]byte(password), salt, 3, 64*1024, 4, 32) // time=3, memory=64MB, threads=4
@@ -363,11 +408,18 @@ hash := argon2.IDKey([]byte(password), salt, 3, 64*1024, 4, 32) // time=3, memor
 
 ---
 
-## 12. Cost Tuning — Bench on Your Machine
+## 11. Cost Tuning — Bench on Your Machine
 
 Bcrypt cost must be tuned to *your* host (M1 vs Fly free tier differ 2×).
 
 ```go
+import (
+    "fmt"
+    "testing"
+
+    "golang.org/x/crypto/bcrypt"
+)
+
 func BenchmarkBcrypt(b *testing.B) {
     for _, cost := range []int{10, 12, 14} {
         b.Run(fmt.Sprintf("cost%d", cost), func(b *testing.B) {
@@ -389,7 +441,7 @@ func BenchmarkBcrypt(b *testing.B) {
 
 ---
 
-## 13. Common Pitfalls — The Bug Party
+## 12. Common Pitfalls — The Bug Party
 
 | Pitfall | What happens | Fix |
 |---|---|---|
@@ -406,7 +458,7 @@ func BenchmarkBcrypt(b *testing.B) {
 
 ---
 
-## 14. Project Tie-In — quicknotes + expense-tracker
+## 13. Project Tie-In — quicknotes + expense-tracker
 
 **Lab `quicknotes` (separate project you chose):**
 - `POST /signup` → validate `01 - Passwords & Hashing.md:8` → `GenerateFromPassword(cost 12)` → `INSERT users (email, password_hash)` → `303 /login`
@@ -421,9 +473,18 @@ func BenchmarkBcrypt(b *testing.B) {
 
 ---
 
-## 15. Quick Reference Cheatsheet
+## 14. Quick Reference Cheatsheet
 
 ```go
+import (
+    "crypto/hmac"
+    "crypto/sha256"
+    "os"
+    "strings"
+
+    "golang.org/x/crypto/bcrypt"
+)
+
 // Hash on signup
 hash, err := bcrypt.GenerateFromPassword([]byte(password), 12) // 60 chars, salt auto
 if err != nil { /* cost out of range or pw >72B */ }
