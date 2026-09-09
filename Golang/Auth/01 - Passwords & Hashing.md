@@ -410,7 +410,11 @@ hash := argon2.IDKey([]byte(password), salt, 3, 64*1024, 4, 32) // time=3, memor
 
 ## 11. Cost Tuning — Bench on Your Machine
 
-Bcrypt cost must be tuned to *your* host (M1 vs Fly free tier differ 2×).
+Bcrypt cost must be tuned to *your* host — same `cost 12` is `~250ms` on your M2 `arm64` but `~600ms` on a slower Fly free tier host (Fly.io = site that runs your app online; free tier = free small server, slower than your Mac). If you only run on your M2, ignore Fly.
+
+**What is bench?** A stopwatch for code. `func BenchmarkBcrypt(b *testing.B)` runs one hash `b.N` times (Go picks `b.N = 100` automatically for stable average), measures total time, prints `ms/op` = milliseconds per **one** operation. Without bench you guess, with bench you *see* `60ms vs 250ms`.
+
+Both `POST /signup` (`GenerateFromPassword`) and `POST /login` (`CompareHashAndPassword`) do the same slow work — bench measures that work.
 
 ```go
 import (
@@ -423,19 +427,21 @@ import (
 func BenchmarkBcrypt(b *testing.B) {
     for _, cost := range []int{10, 12, 14} {
         b.Run(fmt.Sprintf("cost%d", cost), func(b *testing.B) {
-            for i := 0; i < b.N; i++ {
+            for i := 0; i < b.N; i++ { // b.N = how many times Go repeats (e.g. 100)
                 bcrypt.GenerateFromPassword([]byte("bench-password-123"), cost)
             }
         })
     }
 }
-// go test -bench=BenchmarkBcrypt -benchmem
-// BenchmarkBcrypt/cost10-8    12  75ms/op
-// BenchmarkBcrypt/cost12-8     3  310ms/op
-// BenchmarkBcrypt/cost14-8     1  1250ms/op
+// Run: go test -bench=BenchmarkBcrypt -benchmem
+// Output on your M2 (example, yours will be similar):
+// BenchmarkBcrypt/cost10-8    60ms/op  // one hash cost 10 = 0.06s — both signup and login take this
+// BenchmarkBcrypt/cost12-8   250ms/op  // one hash cost 12 = 0.25s — 4× slower than 10, not +20%
+// BenchmarkBcrypt/cost14-8  1000ms/op  // one hash cost 14 = 1.00s — too slow for UX
+// ms/op = milliseconds per operation = time for one GenerateFromPassword / CompareHashAndPassword
 ```
 
-**Rule:** pick highest cost where `POST /login` still <400ms at p95 on your host. For `quicknotes` on Fly free, cost 10 is often right; on M1, cost 12.
+**Rule:** pick highest cost where `POST /login` *and* `POST /signup` still `<400ms` (`0.4s` feels instant, `>400ms` feels laggy) for 95% of users. For `quicknotes` on your M2, `cost 12 = ~250ms` is sweet spot (`cost 10 = ~60ms` too fast for security, `cost 14 = ~1000ms` too slow for UX).
 
 > [!practice] Bench on *both* machines: `go test -bench=.` locally, then `fly ssh console -C "go test -bench=."` on host. Set `const bcryptCost = 12` as a package `const` so tuning is one line.
 
