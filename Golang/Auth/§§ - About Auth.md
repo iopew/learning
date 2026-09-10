@@ -57,7 +57,7 @@ Auth/
 │     Argon2id vs bcrypt vs scrypt, pepper, timing attacks, password validation
 │     (length, TrimSpace, common-password blocklist), never log plain
 │
-├── 02 - Sessions & Cookies.md            ← Phase 1 Core
+├── 02 - Sessions & Cookies.md            ← Phase 1 Core (file created 2026-09-10, not yet studied)
 │     Set-Cookie/Cookie `19 - net:http.md:469`, attributes
 │     (Name, Value, Path, Domain, HttpOnly, Secure, SameSite Lax/Strict/None,
 │     MaxAge, Expires), session table (token PK, user_id FK, expires_at),
@@ -256,7 +256,7 @@ When a new session starts, the user pastes a session summary. The assistant shou
 
 ### Current State
 
-- Topics **00 Overview planned**, **01 Passwords & Hashing ✅ DONE (2026-08-28)** — you are now studying 01 (447 lines, 14 sections). Next: **02 - Sessions & Cookies.md** (Set-Cookie + sessions table bench) per Hybrid Path. `31` placed **at end** as capstone per your 2026-09-02 call.
+- Topics **00 Overview planned**, **01 Passwords & Hashing ✅ DONE (2026-08-28)** — you are studying 01, **02 Sessions & Cookies file created 2026-09-10** (15 sections, not yet studied, 446 lines). Next: **02 study** then **13 Storage & DB / 06 Middleware** per Hybrid Phase 1. `31` at end as capstone.
 - Vault location: `~/Documents/Learning/Golang/Auth/` — companion to `~/Documents/Learning/Golang/` (01-19 DONE). Auth vault is `00-31` (32 notes inc Overview) after 2026-09-02 restructure (21-31 appended as separate short topics, grouped, 31 at end).
 - Pending lab: `~/Documents/Developer/quicknotes` separate project (DB + detailed auth + CRUD, `notes` + `url/tags` + `status draft/active/archived`) will be the proving bench for every Auth note (mirrors `expense-tracker` shape `internal/store` + `internal/web` + `web/templates` + `web/static`). Lab is **separate project**, not lab copy.
 - Naming: `NN - Topic.md` zero-padded, `§§ - About Auth.md` is the index — same as `§§ - About Golang.md`.
@@ -269,6 +269,7 @@ When a new session starts, the user pastes a session summary. The assistant shou
   - Hybrid profit discussion 2026-08-28: core → build → deepen yields higher realized profit than all-theory-first for 2-3 week goal
   - 2026-08-28: `01 - Passwords & Hashing.md` created — 14 sections, bcrypt deep dive, cost/pepper/validation, project tie-in to quicknotes + expense-tracker retrofit
   - 2026-09-02: Curriculum extended to `00-31`, `21-31` grouped, `31` capstone at end, tags `#csrf` etc. added to `§§`.
+  - 2026-09-10: `02 - Sessions & Cookies.md` created — 15 sections, http.Cookie fields, Set-Cookie vs Cookie, 32B hex token, sessions table, MaxAge:-1 logout, SameSite Lax, bench curl jar, updated 01 §9 to log + 01 bench clarified for M2.
 
 ---
 
