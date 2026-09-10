@@ -19,8 +19,7 @@
 - [[#11. Cookie vs localStorage vs sessionStorage]]
 - [[#12. SameSite — Lax vs Strict vs None + Secure]]
 - [[#13. Common Pitfalls — The Bug Party]]
-- [[#14. Project Tie-In — quicknotes + expense-tracker]]
-- [[#15. Quick Reference Cheatsheet]]
+- [[#14. Quick Reference Cheatsheet]]
 
 ---
 
@@ -376,24 +375,7 @@ http.SetCookie(w, &http.Cookie{Name: "session", Value: token, Path: "/", HttpOnl
 
 ---
 
-## 14. Project Tie-In — quicknotes + expense-tracker
-
-**Lab `quicknotes` (separate project you chose) `Golang/Auth/§§ - About Auth.md:184`:**
-- After `01` hash → `02` token → `sessions` table → `Set-Cookie` `02:6`
-- Next `06 Middleware` → `RequireAuth(next http.Handler) http.Handler` `19:333` reads `r.Cookie` `02:7` → `FindValidSession` `02:8` → `r.WithContext` `19:650` with `user_id`
-- `13 Storage` → every `SELECT ... WHERE user_id=?` `Golang/Auth/§§ - About Auth.md:184` uses `user_id` from context, not cookie
-- `POST /notes/add` → `INSERT INTO notes (user_id, title, body) VALUES (?, ?, ?)` with `user_id` from session
-
-**Retrofit `expense-tracker` `feature/gemini 9113d57` `Golang/Auth/§§ - About Auth.md:184`:**
-- `ALTER TABLE expenses ADD COLUMN user_id INTEGER REFERENCES users(id)` + `UPDATE expenses SET user_id=1`
-- Wrap `mux.HandleFunc("GET /expenses", RequireAuth(web.ListPage(st)))` `cmd/expense/main.go:21`
-- Add `users` + `sessions` tables `internal/store/store.go:20`
-
-> [!note] `quicknotes` and `expense-tracker` share identical `02` code — copy `internal/store/sessions.go` + `SetCookie`/`r.Cookie` between repos. That's hybrid profit: one bench, two products.
-
----
-
-## 15. Quick Reference Cheatsheet
+## 14. Quick Reference Cheatsheet
 
 ```go
 import (
