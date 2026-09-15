@@ -1,6 +1,6 @@
 # Auth — Sessions & Cookies
 
-> **Series:** Auth **Tags:** #auth #session #cookies #golang #security #net-http #cryptography **Level:** Beginner → Intermediate
+> 	**Series:** Auth **Tags:** #auth #session #cookies #golang #security #net-http #cryptography **Level:** Beginner → Intermediate
 
 ---
 
