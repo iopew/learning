@@ -56,7 +56,7 @@ type Cookie struct {
     Path     string // "/" — cookie sent to every path; "/notes" = only /notes
     Domain   string // "" = current host only; ".example.com" = subdomains
     Expires  time.Time // absolute expiry — browser deletes after
-    MaxAge   int       // seconds until expiry — 0 = session cookie (browser close), -1 = delete now 19:492
+    MaxAge   int       // seconds until expiry — 0 = no Max-Age attribute (session cookie only if Expires is also unset), -1 = delete now (sent as Max-Age=0) 19:492
     Secure   bool      // true = only over https — set in prod 12 - HTTPS
     HttpOnly bool      // true = JS document.cookie cannot read — XSS mitigation 08
     SameSite http.SameSite // Lax/Strict/None — CSRF mitigation 07
@@ -108,9 +108,9 @@ token := c.Value
 
 Single table for `quicknotes` and `expense-tracker` retrofit `Golang/Auth/§§ - About Auth.md:184`:
 
-```sql
-import "modernc.org/sqlite" // same as expense-tracker internal/store/store.go:14
+Driver: `modernc.org/sqlite` — same as `expense-tracker` `internal/store/store.go:14`.
 
+```sql
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     email TEXT UNIQUE NOT NULL,
@@ -120,13 +120,15 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS sessions (
     token TEXT PRIMARY KEY, -- 64 hex chars
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    expires_at TEXT NOT NULL -- ISO8601 "2006-01-02 15:04:05" or RFC3339
+    expires_at TEXT NOT NULL -- UTC "2006-01-02 15:04:05" — same format as SQLite datetime('now')
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 ```
 
-> [!tip] `TEXT PRIMARY KEY` for `token` — never `INTEGER`. `user_id FK` gives `ON DELETE CASCADE` — deleting user auto-deletes sessions. `expires_at TEXT` with ISO8601 sorts chronologically like `expense-tracker` `store.go:30`.
+> [!tip] `TEXT PRIMARY KEY` for `token` — never `INTEGER`. `user_id FK` gives `ON DELETE CASCADE` — deleting user auto-deletes sessions. `expires_at TEXT` sorts chronologically like `expense-tracker` `store.go:30` — **only if every row uses one format and one timezone**, identical to what `datetime('now')` returns (UTC, `YYYY-MM-DD HH:MM:SS`).
+
+> [!warning] SQLite compares `TEXT` character by character. RFC3339 `2026-09-29T10:00:00Z` vs `datetime('now')` `2026-09-29 12:00:00` → `'T'` (0x54) > `' '` (0x20) → the 10:00 session reads as **still valid at 12:00** — on the same date, every expired session passes. A `+05:00` offset is ignored too. Store `time.Now().UTC().Format("2006-01-02 15:04:05")`.
 
 ---
 
@@ -161,8 +163,14 @@ After `01` login success `01:2` → create session row → set cookie:
 ```go
 import (
     "net/http"
+    "net/url"
     "time"
+
+    "golang.org/x/crypto/bcrypt"
 )
+
+// Same layout SQLite datetime('now') returns — text comparison stays chronological
+const sqliteTime = "2006-01-02 15:04:05"
 
 func Login(st *store.Store) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
@@ -173,10 +181,18 @@ func Login(st *store.Store) http.HandlerFunc {
             http.Redirect(w, r, "/login?err="+url.QueryEscape("invalid credentials"), http.StatusSeeOther)
             return
         }
-        userID, _ := st.FindUserIDByEmail(email)
-        token, _ := generateToken()
-        expiresAt := time.Now().Add(7 * 24 * time.Hour)
-        if err := st.CreateSession(token, userID, expiresAt.Format(time.RFC3339)); err != nil {
+        userID, err := st.FindUserIDByEmail(email)
+        if err != nil {
+            http.Error(w, "user lookup failed", http.StatusInternalServerError)
+            return
+        }
+        token, err := generateToken()
+        if err != nil { // never INSERT an empty token
+            http.Error(w, "token generation failed", http.StatusInternalServerError)
+            return
+        }
+        expiresAt := time.Now().UTC().Add(7 * 24 * time.Hour)
+        if err := st.CreateSession(token, userID, expiresAt.Format(sqliteTime)); err != nil {
             http.Error(w, "session create failed", http.StatusInternalServerError)
             return
         }
@@ -197,6 +213,8 @@ func Login(st *store.Store) http.HandlerFunc {
 
 > [!note] `SetCookie` before `Redirect` — `Redirect` calls `WriteHeader(303)` `19:7`, headers must be staged before.
 
+> [!warning] Never discard errors with `_` here. `token, _ := generateToken()` → if `crypto/rand` fails, `token == ""` is inserted as a real session and set as the cookie. `userID, _ :=` → `0` becomes the session owner.
+
 Store helpers:
 
 ```go
@@ -214,23 +232,18 @@ func (s *Store) CreateSession(token string, userID int64, expiresAt string) erro
 import "net/http"
 
 c, err := r.Cookie("session")
-if err == http.ErrNoCookie {
-    // not logged in — redirect to /login
+if err != nil { // only possible error: http.ErrNoCookie — not logged in
     http.Redirect(w, r, "/login", http.StatusSeeOther)
-    return
-}
-if err != nil {
-    http.Error(w, "bad cookie", http.StatusBadRequest)
-    return
+    return // without return, c is nil → c.Value panics
 }
 token := c.Value
-if token == "" {
+if token == "" { // cookie present but empty (e.g. leftover from logout)
     http.Redirect(w, r, "/login", http.StatusSeeOther)
     return
 }
 ```
 
-> [!info] `r.Cookie` parses `Cookie` header `19:479`. If browser sends no `Cookie: session=`, you get `http.ErrNoCookie` — not `sql.ErrNoRows`. Check cookie error *before* DB lookup.
+> [!info] `r.Cookie` parses `Cookie` header `19:479`. If browser sends no `Cookie: session=`, you get `http.ErrNoCookie` — not `sql.ErrNoRows` — and `c` is `nil`. `ErrNoCookie` is the **only** error `r.Cookie` returns, so a separate "bad cookie" branch never runs. Check cookie error *before* DB lookup.
 
 ---
 
@@ -246,8 +259,11 @@ func (s *Store) FindSession(token string) (userID int64, ok bool, err error) {
     if err != nil {
         return 0, false, err // sql.ErrNoRows → invalid token
     }
-    t, _ := time.Parse(time.RFC3339, exp)
-    if time.Now().After(t) {
+    t, err := time.Parse(sqliteTime, exp) // no zone in layout → parsed as UTC
+    if err != nil {
+        return 0, false, fmt.Errorf("parse expires_at %q: %w", exp, err)
+    }
+    if time.Now().UTC().After(t) {
         return 0, false, nil // expired — caller will delete and redirect
     }
     return uid, true, nil
@@ -261,7 +277,7 @@ func (s *Store) FindValidSession(token string) (int64, error) {
 }
 ```
 
-> [!tip] Use `AND expires_at > datetime('now')` `store.go:48` pattern — filtering in DB `store.go:74` like `expense-tracker` `List` `WHERE date BETWEEN`. Never trust cookie `Expires` alone.
+> [!tip] Use `AND expires_at > datetime('now')` `store.go:48` pattern — filtering in DB `store.go:74` like `expense-tracker` `List` `WHERE date BETWEEN`. Never trust cookie `Expires` alone. Works only because `expires_at` is stored as UTC `2006-01-02 15:04:05` `02:4` — same text shape as `datetime('now')`.
 
 ---
 
@@ -291,7 +307,7 @@ go func() {
 }()
 ```
 
-> [!note] `datetime('now')` is UTC in SQLite `modernc.org/sqlite` — store `expires_at` as `time.Now().UTC().Format(time.RFC3339)` to avoid Tashkent vs UTC drift.
+> [!note] `datetime('now')` is UTC `YYYY-MM-DD HH:MM:SS` in SQLite `modernc.org/sqlite` — store `expires_at` as `time.Now().UTC().Format("2006-01-02 15:04:05")`. Local time (Tashkent `+05:00`) or RFC3339 (`T` separator) breaks the text comparison `02:4`.
 
 ---
 
@@ -334,10 +350,10 @@ func (s *Store) DeleteSession(token string) error {
 | Storage | Where | Sent to server? | JS readable? | Use for session? |
 |---|---|---|---|---|
 | **Cookie** `http.Cookie` `19:469` | Browser, per `Path/Domain` | Yes — `Cookie:` header every request `02:3` | No if `HttpOnly` `02:2` | **Yes** — server reads `r.Cookie` |
-| **localStorage** | Browser, per origin | No — only JS `localStorage.getItem` | Yes — `document.localStorage` | No — JS can steal via XSS `08` |
+| **localStorage** | Browser, per origin | No — only JS `localStorage.getItem` | Yes — `window.localStorage` | No — JS can steal via XSS `08` |
 | **sessionStorage** | Browser, per tab | No | Yes | No — lost on tab close, still XSS-stealable |
 
-> [!warning] Never store `session` token in `localStorage` — `XSS` `08` `document.localStorage.getItem` leaks it. `HttpOnly` cookie `02:2` is the only store JS cannot read.
+> [!warning] Never store `session` token in `localStorage` — `XSS` `08` `localStorage.getItem` leaks it. `HttpOnly` cookie `02:2` is the only store JS cannot read.
 
 ---
 
@@ -365,11 +381,13 @@ http.SetCookie(w, &http.Cookie{Name: "session", Value: token, Path: "/", HttpOnl
 | Pitfall | What happens | Fix |
 |---|---|---|
 | `SetCookie` after `WriteHeader` | `Header()` already flushed `19:5` → `Set-Cookie` never sent, browser never stores session → always redirect to login | `SetCookie` before `Redirect`/`WriteHeader` |
-| `Value` with `;` or space | Cookie parsing breaks — `Value` truncated at `;` | Use `hex.EncodeToString` (only `0-9a-f`) `02:5` |
+| `Value` with `;` or space | `http.SetCookie` silently **drops** invalid bytes like `;` (logs `invalid byte ';' in Cookie.Value; dropping invalid bytes`) and wraps values with space/comma in quotes → stored value ≠ DB token | Use `hex.EncodeToString` (only `0-9a-f`) `02:5` |
 | `Path: "/notes"` vs `"/"` | Cookie only sent to `/notes`, not `/logout` → `r.Cookie` miss on logout | `Path: "/"` for session `02:2` |
 | `SELECT WHERE token=?` without expiry | Expired token still valid until manual cleanup → session never expires | `AND expires_at > datetime('now')` `02:8` |
-| `MaxAge: 0` vs `-1` confusion | `0` = session cookie (dies on browser close), not delete. Delete is `-1` `19:492` | `Logout` uses `-1` `02:10` |
-| `r.Cookie` without `http.ErrNoCookie` check | `token == ""` treated as DB lookup → `SELECT WHERE token=''` → `sql.ErrNoRows` logged as error | Check `err == http.ErrNoCookie` first `02:7` |
+| `MaxAge: 0` vs `-1` confusion | `0` = no `Max-Age` attribute (session cookie if `Expires` also unset), not delete. Delete is `-1` → Go sends `Max-Age=0` `19:492` | `Logout` uses `-1` `02:10` |
+| `r.Cookie` error ignored, or checked without `return` | `c` is `nil` on `http.ErrNoCookie` → `c.Value` **panics** (nil pointer dereference) | `if err != nil { redirect; return }` before `c.Value` `02:7` |
+| `expires_at` stored as RFC3339 or local time | Text compare vs `datetime('now')`: `'T'` > `' '` → expired sessions still valid for the rest of the day, cleanup skips them; `+05:00` offset ignored | Store UTC `"2006-01-02 15:04:05"` `02:4` |
+| `token, _ := generateToken()` | `crypto/rand` failure → empty token inserted and set as cookie | Check the error, return `500` `02:6` |
 | Storing `user_id` in cookie `Value` | Client tampers `session=3` → `user_id=3` → IDOR `30` | `Value` is random token, `user_id` only in `sessions` table `02:4` |
 | Not deleting expired rows | `sessions` table grows forever | `DELETE WHERE expires_at < now()` with `idx` `02:9` |
 
@@ -394,8 +412,9 @@ func generateToken() (string, error) {
     return hex.EncodeToString(b), nil // 64 hex
 }
 
-// Create session row
-_, err = db.Exec("INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)", token, userID, time.Now().Add(7*24*time.Hour).Format(time.RFC3339))
+// Create session row — UTC, same layout as datetime('now')
+const sqliteTime = "2006-01-02 15:04:05"
+_, err = db.Exec("INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)", token, userID, time.Now().UTC().Add(7*24*time.Hour).Format(sqliteTime))
 // Find valid session
 var uid int64
 err = db.QueryRow("SELECT user_id FROM sessions WHERE token=? AND expires_at > datetime('now')", token).Scan(&uid)
@@ -407,19 +426,22 @@ db.Exec("DELETE FROM sessions WHERE token=?", token)
 
 // Set cookie (must be before WriteHeader)
 http.SetCookie(w, &http.Cookie{
-    Name: token, Value: token, Path: "/", Expires: time.Now().Add(7*24*time.Hour),
+    Name: "session", Value: token, Path: "/", Expires: time.Now().Add(7*24*time.Hour),
     MaxAge: 7*24*3600, HttpOnly: true, Secure: false, SameSite: http.SameSiteLaxMode,
 })
 // Read cookie
 c, err := r.Cookie("session")
-if err == http.ErrNoCookie { /* redirect /login */ }
+if err != nil { // http.ErrNoCookie — c is nil
+    http.Redirect(w, r, "/login", http.StatusSeeOther)
+    return
+}
 token := c.Value
 
 // Cookie fields 19:469
-// Name, Value, Path="/", Domain="", Expires, MaxAge (0 session, -1 delete 19:492), HttpOnly true, Secure true in prod, SameSite Lax
+// Name, Value, Path="/", Domain="", Expires, MaxAge (0 = no attribute, -1 = delete → Max-Age=0 19:492), HttpOnly true, Secure true in prod, SameSite Lax
 ```
 
-> [!practice] Bench + prove: `curl -c jar.txt -d "email=a@b.com&password=secret123" http://localhost:8080/login` → `Set-Cookie: session=...` → `curl -b jar.txt http://localhost:8080/notes` → 200, `curl -b jar.txt http://localhost:8080/logout` → `Set-Cookie: session=; Max-Age=0` + DB row gone. Prove `r.Cookie` miss after `MaxAge:-1` via `sqlite3 expense.db "SELECT COUNT(*) FROM sessions"`.
+> [!practice] Bench + prove: `curl -c jar.txt -d "email=a@b.com&password=secret123" http://localhost:8080/login` → `Set-Cookie: session=...` → `curl -b jar.txt http://localhost:8080/notes` → 200, `curl -b jar.txt http://localhost:8080/logout` → `Set-Cookie: session=; Max-Age=0` (Go writes `MaxAge:-1` as `Max-Age=0`) + DB row gone. Prove `r.Cookie` miss after `MaxAge:-1` via `sqlite3 expense.db "SELECT COUNT(*) FROM sessions"`.
 ---
 
-_Previous: [[01 - Passwords & Hashing]] · Next: [[06 - Middleware & Context]]_ // Hybrid Phase 1: 00→01→02→13→06→14 — numeric Next is 03 JWT but Phase 1 Next is 06 per §§ - About Auth.md:183
+_Previous: [[01 - Passwords & Hashing]] · Next: [[13 - Storage & DB]]_
