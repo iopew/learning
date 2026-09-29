@@ -126,7 +126,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 ```
 
-> [!tip] `TEXT PRIMARY KEY` for `token` — never `INTEGER`. `user_id FK` gives `ON DELETE CASCADE` — deleting user auto-deletes sessions. `expires_at TEXT` sorts chronologically like `expense-tracker` `store.go:30` — **only if every row uses one format and one timezone**, identical to what `datetime('now')` returns (UTC, `YYYY-MM-DD HH:MM:SS`).
+> [!tip] `TEXT PRIMARY KEY` for `token` — never `INTEGER`. `user_id FK` gives `ON DELETE CASCADE` — deleting user auto-deletes sessions, **but only if foreign keys are enabled**: SQLite ignores FKs by default, per connection. Enable on every pooled connection via DSN `sql.Open("sqlite", "file:app.db?_pragma=foreign_keys(1)")` — a one-time `db.Exec("PRAGMA foreign_keys = ON")` hits only one connection. `expires_at TEXT` sorts chronologically like `expense-tracker` `store.go:30` — **only if every row uses one format and one timezone**, identical to what `datetime('now')` returns (UTC, `YYYY-MM-DD HH:MM:SS`).
 
 > [!warning] SQLite compares `TEXT` character by character. RFC3339 `2026-09-29T10:00:00Z` vs `datetime('now')` `2026-09-29 12:00:00` → `'T'` (0x54) > `' '` (0x20) → the 10:00 session reads as **still valid at 12:00** — on the same date, every expired session passes. A `+05:00` offset is ignored too. Store `time.Now().UTC().Format("2006-01-02 15:04:05")`.
 
@@ -213,7 +213,7 @@ func Login(st *store.Store) http.HandlerFunc {
 
 > [!note] `SetCookie` before `Redirect` — `Redirect` calls `WriteHeader(303)` `19:7`, headers must be staged before.
 
-> [!warning] Never discard errors with `_` here. `token, _ := generateToken()` → if `crypto/rand` fails, `token == ""` is inserted as a real session and set as the cookie. `userID, _ :=` → `0` becomes the session owner.
+> [!warning] Never discard errors with `_` here. `userID, _ :=` → a failed lookup makes `0` the session owner. `token, _ := generateToken()` → if generation fails, `token == ""` is inserted as a real session and set as the cookie. (Since Go 1.24 `crypto/rand.Read` crashes the program instead of returning an error, but the signature still returns one — check it; a custom generator can fail.)
 
 Store helpers:
 
