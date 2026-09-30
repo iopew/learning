@@ -411,7 +411,7 @@ I’d like to learn about Functions in Go comprehensively with detailed examples
 
 ---
 
-Make questions for anki until the the end of 12th section (generic functions). Avoid Yes\No questions. Make them contemplative and complex. Include coding. Make a lot of questions, do not limit yourself to a few questions for the section, make a lot of them, so that YOU COVER EVERYTHING, do not miss anything. I expect a MINIMUM of 50 questions
+Make questions for anki until the the end of 12th section (generic functions). 25-30 cards per topic, no yes/no. Focused cards: one idea each, short answers. Mix predict the output, spot the bug, write the fix, and plain concept questions. Cover every section.
 
 ---
 ---
