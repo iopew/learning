@@ -122,7 +122,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     expires_at TEXT NOT NULL -- ISO8601 "2006-01-02 15:04:05" or RFC3339
 );
-CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+			2CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 ```
 
