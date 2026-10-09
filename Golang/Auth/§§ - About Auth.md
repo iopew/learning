@@ -199,7 +199,7 @@ I’d like to learn about Auth — Passwords & Hashing in Go comprehensively wit
 
 ---
 
-Make questions for anki until the end of 06 - Middleware section. Avoid Yes\No questions. Make them contemplative and complex. Include coding. Make a lot of questions, do not limit yourself to a few questions for the section, make a lot of them, so that YOU COVER EVERYTHING, do not miss anything. I expect a MINIMUM of 50 questions
+Make questions for anki until the end of 06 - Middleware section. 25-30 cards per topic, no yes/no. Focused cards: one idea each, short answers. Mix predict the output, spot the bug, write the fix, and plain concept questions. Cover every section.
 
 ---
 
@@ -394,13 +394,19 @@ When I say “let’s explore topic X”, create a **full, detailed Obsidian not
 
 When making Anki questions:
 
-- **No yes/no questions** — all questions must be contemplative and complex
-- **Include coding questions** — predict output, spot the bug, write the fix
-- **Cover everything** — aim for minimum 25-30 cards per topic, do not miss sections
-- **Format:**
+- **No yes/no questions** — every question needs real understanding to answer (why / how / what happens), not a guess
+- **Include coding questions** — a solid mix of: predict the output, spot the bug, write the fix
+- **Cover everything** — every section of the note, none skipped for seeming minor; **25-30 cards per topic** (not 50+)
+- **Small cards** — one idea per card, or two closely related ideas at most; answers of 1-3 lines; code snippets a few lines. Merge related pairs (e.g. Lax vs Strict) instead of writing two cards or one huge one
+- **Self-contained** — each question includes all the code or scenario it needs inline; never "in this pattern..." or "given the function above..."
+- **Cards never refer to each other** — no "the bug from the previous question", no "the code above/below"; each card is answerable a year later with zero other context
+- **Balance code vs concept** — code only where it tests real code behavior (output, bugs, fixes); pure definitions and "why" questions stay plain text
+- **Verify** — run any predict-the-output snippet before writing the answer
+- **Format:** one blank line between cards
     
     ```
-    Q: [question]A: [answer with code if needed]
+    Q: [question]
+    A: [answer, with code if needed]
     ```
     
 
@@ -487,6 +493,6 @@ I’d like to learn about Passwords & Hashing in Go comprehensively with detaile
 
 ---
 
-Make questions for anki until the end of 06 - Middleware section. Avoid Yes\No questions. Make them contemplative and complex. Include coding. Make a lot of questions, do not limit yourself to a few questions for the section, make a lot of them, so that YOU COVER EVERYTHING, do not miss anything. I expect a MINIMUM of 50 questions
+Make questions for anki until the end of 06 - Middleware section. 25-30 cards per topic, no yes/no. Focused cards: one idea each, short answers. Mix predict the output, spot the bug, write the fix, and plain concept questions. Cover every section.
 
 ---
