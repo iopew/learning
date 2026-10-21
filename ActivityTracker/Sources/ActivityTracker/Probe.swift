@@ -13,7 +13,7 @@ enum Probe {
             print("accessibility:      \(WindowTitle.isTrusted ? "granted" : "not granted")")
             print("window title:       \(WindowTitle.focusedWindowTitle(of: app.processIdentifier))")
             if BrowserURL.isBrowser(bundleID) {
-                let url = BrowserURL.currentURL(bundleID: bundleID)
+                let url = BrowserURL.fetchURL(bundleID: bundleID) ?? ""
                 print("browser URL:        \(url) (error: \(BrowserURL.lastErrors[bundleID].map(String.init) ?? "none"))")
             }
         } else {

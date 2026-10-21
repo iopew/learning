@@ -173,9 +173,14 @@ enum BrowserURL {
     /// Returned instead of a URL when the front window is private (incognito).
     static let privateMarker = "__private__"
 
-    private static var scripts: [String: NSAppleScript] = [:]
     /// Last AppleScript error per browser bundle ID; -1743 means the user denied Automation access.
-    private(set) static var lastErrors: [String: Int] = [:]
+    static var lastErrors: [String: Int] {
+        errorLock.lock()
+        defer { errorLock.unlock() }
+        return errors
+    }
+    private static var errors: [String: Int] = [:]
+    private static let errorLock = NSLock()
 
     static let notPermittedError = -1743
 
@@ -189,21 +194,48 @@ enum BrowserURL {
         return ["Private Browsing", "Приватный просмотр", "Приватное окно"].contains { title.contains($0) }
     }
 
-    /// Must be called on the main thread (NSAppleScript is not thread-safe).
-    static func currentURL(bundleID: String) -> String {
-        guard let script = script(for: bundleID) else { return "" }
-        var error: NSDictionary?
-        let result = script.executeAndReturnError(&error)
-        if let error {
-            lastErrors[bundleID] = (error[NSAppleScript.errorNumber] as? Int) ?? -1
-            return ""
+    /// Asks the browser for the front tab's URL by running `osascript` — a separate process, so neither a slow
+    /// browser nor macOS's "allow ActivityTracker to control …?" prompt can ever block the app. Killed after
+    /// `timeout`. Blocking: call it from a background queue only.
+    static func fetchURL(bundleID: String, timeout: TimeInterval = 4) -> String? {
+        guard let source = scriptSource(for: bundleID) else { return nil }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", source]
+        let output = Pipe()
+        let errorOutput = Pipe()
+        process.standardOutput = output
+        process.standardError = errorOutput
+        do { try process.run() } catch { return nil }
+
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
+        if process.isRunning {
+            process.terminate()
+            setError(-1712, for: bundleID)   // timed out (e.g. waiting for the user to answer the permission prompt)
+            return nil
         }
-        lastErrors[bundleID] = nil
-        return result.stringValue ?? ""
+        let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard process.terminationStatus == 0 else {
+            let message = String(decoding: errorOutput.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            // osascript reports "… (-1743)" when Automation access was denied.
+            let code = message.range(of: #"\((-?\d+)\)"#, options: .regularExpression)
+                .flatMap { Int(message[$0].dropFirst().dropLast()) } ?? -1
+            setError(code, for: bundleID)
+            return nil
+        }
+        setError(nil, for: bundleID)
+        return text
     }
 
-    private static func script(for bundleID: String) -> NSAppleScript? {
-        if let cached = scripts[bundleID] { return cached }
+    private static func setError(_ code: Int?, for bundleID: String) {
+        errorLock.lock()
+        errors[bundleID] = code
+        errorLock.unlock()
+    }
+
+    private static func scriptSource(for bundleID: String) -> String? {
         let body: String
         if safariFamily.contains(bundleID) {
             body = "return URL of front document"
@@ -223,17 +255,69 @@ enum BrowserURL {
         } else {
             return nil
         }
-        // A short timeout: a hung browser must not freeze the menu bar app.
-        let source = """
+        return """
             with timeout of 2 seconds
                 tell application id "\(bundleID)"
             \(body)
                 end tell
             end timeout
             """
-        let script = NSAppleScript(source: source)
-        scripts[bundleID] = script
-        return script
+    }
+}
+
+/// Keeps the browser's front-tab URL per window, fetched in the background (see `BrowserURL.fetchURL`).
+/// The tracker's tick only reads this cache, so it never waits for a browser.
+final class BrowserURLCache {
+    enum Lookup: Equatable {
+        case url(String)
+        /// A fetch for this window is under way: skip this tick rather than record the page without its site.
+        case waiting
+        /// No URL to be had (Firefox, no permission, browser not answering): record without a site.
+        case unavailable
+    }
+
+    static let shared = BrowserURLCache()
+
+    private struct Key: Hashable {
+        var pid: pid_t
+        var title: String
+    }
+
+    private struct Entry {
+        var url: String?
+        var fetchedAt: Date
+    }
+
+    private let queue = DispatchQueue(label: "ActivityTracker.browser-url", qos: .utility)
+    private let lock = NSLock()
+    private var entries: [Key: Entry] = [:]
+    private var inFlight: [Key: Date] = [:]
+
+    /// `title`: the focused window's title, so a new page (new title) triggers a new fetch right away.
+    func lookup(bundleID: String, pid: pid_t, title: String) -> Lookup {
+        let key = Key(pid: pid, title: title)
+        let now = Date()
+        lock.lock()
+        defer { lock.unlock() }
+
+        let entry = entries[key]
+        if (entry == nil || now.timeIntervalSince(entry!.fetchedAt) > 15) && inFlight[key] == nil {
+            inFlight[key] = now
+            queue.async { [self] in
+                let url = BrowserURL.fetchURL(bundleID: bundleID)
+                lock.lock()
+                if entries.count > 300 { entries.removeAll() }
+                entries[key] = Entry(url: url, fetchedAt: Date())
+                inFlight[key] = nil
+                lock.unlock()
+            }
+        }
+        if let entry {
+            return entry.url.map(Lookup.url) ?? .unavailable
+        }
+        // First time this window/page is seen: wait for the fetch, but never for long.
+        if let started = inFlight[key], now.timeIntervalSince(started) < 6 { return .waiting }
+        return .unavailable
     }
 }
 

@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import SwiftUI
 import ActivityCore
 
@@ -102,6 +103,9 @@ struct ActivityTrackerApp: App {
     }
 
     private static func startServices() {
+        // Every Accessibility call to another app gives up after half a second (default: 6 s per call), so a
+        // hung app can't stall the tracker.
+        AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 0.5)
         let services = AppServices.shared
         services.settings.firstRunSetup()
         services.tracker.start()

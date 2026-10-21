@@ -134,6 +134,14 @@ public struct Recommendation: Equatable, Identifiable {
     public var symbol: String
     public var title: String
     public var detail: String
+
+    public init(id: String, kind: Kind, symbol: String, title: String, detail: String) {
+        self.id = id
+        self.kind = kind
+        self.symbol = symbol
+        self.title = title
+        self.detail = detail
+    }
 }
 
 /// How a usual day looked over the previous weeks (per active day).

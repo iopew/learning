@@ -100,17 +100,18 @@ final class Tracker: ObservableObject {
         let title = settings.recordTitles || isBrowser
             ? String(WindowTitle.focusedWindowTitle(of: app.processIdentifier).prefix(300)) : ""
         if isBrowser {
-            let url = BrowserURL.currentURL(bundleID: bundleID)
+            // Both lookups only read caches filled in the background: the tick never waits for a browser.
+            let lookup = BrowserURLCache.shared.lookup(bundleID: bundleID, pid: app.processIdentifier, title: title)
+            let badge = PrivateWindowDetector.verdict(for: app.processIdentifier)
             // Private windows leave no trace at all: not the time, not the site, not the title.
             // Three independent signals: the browser's AppleScript, Firefox's title, the incognito badge in the UI.
-            let badge = PrivateWindowDetector.verdict(for: app.processIdentifier)
-            if url == BrowserURL.privateMarker || BrowserURL.isPrivateWindowTitle(title, bundleID: bundleID)
+            if lookup == .url(BrowserURL.privateMarker) || BrowserURL.isPrivateWindowTitle(title, bundleID: bundleID)
                 || badge == .privateWindow {
                 return pause(.privateWindow, at: now)
             }
-            // A window seen for the first time is being checked in the background: skip this one tick.
-            if badge == .unknown { return }
-            if settings.recordURLs { sample.url = String(url.prefix(2000)) }
+            // A window/page seen for the first time is being checked in the background: skip this one tick.
+            if badge == .unknown || lookup == .waiting { return }
+            if settings.recordURLs, case .url(let url) = lookup { sample.url = String(url.prefix(2000)) }
         }
         if settings.recordTitles { sample.title = title }
 
