@@ -1,0 +1,51 @@
+name: ActivityTracker
+
+on:
+  push:
+    paths:
+      - "ActivityTracker/**"
+      - ".github/workflows/activity-tracker.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: ActivityTracker
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: swift --version
+
+      - name: Unit tests
+        run: swift test
+
+      - name: Build app bundle
+        run: UNIVERSAL=1 ./build.sh
+
+      - name: Check bundle
+        run: |
+          plutil -lint .build/ActivityTracker.app/Contents/Info.plist
+          codesign --verify --verbose .build/ActivityTracker.app
+          lipo -info .build/ActivityTracker.app/Contents/MacOS/ActivityTracker
+
+      - name: Probe collectors and database
+        run: .build/ActivityTracker.app/Contents/MacOS/ActivityTracker --probe
+
+      - name: Launch the app and make sure it keeps running
+        run: |
+          open .build/ActivityTracker.app
+          sleep 20
+          pgrep -x ActivityTracker
+          ls -la "$HOME/Library/Application Support/ActivityTracker/"
+          pkill -x ActivityTracker
+
+      - name: Package
+        run: ditto -c -k --keepParent .build/ActivityTracker.app .build/ActivityTracker.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ActivityTracker
+          path: ActivityTracker/.build/ActivityTracker.zip

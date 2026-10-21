@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.iopew.ActivityTracker</string>
+    <key>CFBundleName</key>
+    <string>ActivityTracker</string>
+    <key>CFBundleDisplayName</key>
+    <string>ActivityTracker</string>
+    <key>CFBundleExecutable</key>
+    <string>ActivityTracker</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>ru</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>ActivityTracker читает адрес открытой вкладки, чтобы считать время на сайтах. Данные остаются только на этом Mac.</string>
+</dict>
+</plist>
