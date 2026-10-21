@@ -6,6 +6,7 @@ import ActivityCore
 struct HourlyChart: View {
     let slices: [HourSlice]
     let colors: AppColors
+    var height: CGFloat = 130
 
     private static let hours = (0..<24).map { String(format: "%02d", $0) }
 
@@ -30,13 +31,14 @@ struct HourlyChart: View {
                 }
             }
         }
-        .frame(height: 130)
+        .frame(height: height)
     }
 }
 
 /// Active time per day (or per week for long periods) with the daily average as a dashed line.
 struct RangeChart: View {
     let report: Report
+    var height: CGFloat = 150
 
     var body: some View {
         let unit: Calendar.Component = report.bucketUnit == .day ? .day : .weekOfYear
@@ -66,7 +68,7 @@ struct RangeChart: View {
                     }
                 }
             }
-            .frame(height: 150)
+            .frame(height: height)
         }
     }
 
@@ -81,10 +83,9 @@ struct RangeChart: View {
 struct MinuteGrid: View {
     let minutes: [MinuteCell?]
     let colors: AppColors
+    var rowHeight: CGFloat = 7
 
     @State private var hovered: Int?
-
-    private let rowHeight: CGFloat = 7
     private let labelWidth: CGFloat = 20
 
     var body: some View {
@@ -105,7 +106,7 @@ struct MinuteGrid: View {
                         let y = CGFloat(hour) * rowHeight
                         if hour % 3 == 0 {
                             context.draw(
-                                Text(String(format: "%02d", hour)).font(.system(size: 7)).foregroundColor(.secondary),
+                                Text(String(format: "%02d", hour)).font(.system(size: min(10, rowHeight))).foregroundColor(.secondary),
                                 at: CGPoint(x: 0, y: y + rowHeight / 2), anchor: .leading)
                         }
                         for minute in 0..<60 {

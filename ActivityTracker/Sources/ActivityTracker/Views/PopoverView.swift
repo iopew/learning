@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import ActivityCore
 
-/// The window that opens from the menu bar item.
+/// The small window that opens from the menu bar item.
 struct PopoverView: View {
     let databaseURL: URL
     let startupError: String?
@@ -12,17 +12,7 @@ struct PopoverView: View {
     @EnvironmentObject private var settings: Settings
 
     @State private var showSettings = false
-    @State private var tab: ListTab = .apps
-
-    private let refresh = Timer.publish(every: 15, on: .main, in: .common).autoconnect()
-
-    enum ListTab: String, CaseIterable, Identifiable {
-        case apps = "Приложения"
-        case sites = "Сайты"
-        case timeline = "Хронология"
-
-        var id: String { rawValue }
-    }
+    @State private var isOpen = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -40,7 +30,19 @@ struct PopoverView: View {
             if showSettings {
                 SettingsView(databaseURL: databaseURL)
             } else {
-                statistics
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        UpdateBanner()
+                        StatsControls()
+                        if let report = stats.report {
+                            ReportOverview(report: report, style: .compact)
+                            ReportLists(report: report)
+                        } else {
+                            ReportPlaceholder()
+                        }
+                    }
+                    .padding(14)
+                }
             }
             Divider()
             footer
@@ -48,73 +50,26 @@ struct PopoverView: View {
                 .padding(.vertical, 8)
         }
         .frame(width: 460, height: 700)
-        .onAppear { stats.reload() }
-        .onReceive(refresh) { _ in
-            // Keep "today" live while the window is open; past periods don't change.
-            if !showSettings && stats.isAtToday && stats.range == .day { stats.reload() }
+        .onAppear {
+            isOpen = true
+            stats.reload()
         }
-    }
-
-    private var statistics: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                Picker("Период", selection: $stats.range) {
-                    ForEach(StatsRange.allCases) { range in
-                        Text(range.title).tag(range)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-
-                PeriodBar()
-
-                if let report = stats.report {
-                    let colors = AppColors(apps: report.apps)
-                    SummaryRow(report: report)
-
-                    if report.range == .day {
-                        HourlyChart(slices: report.hourly, colors: colors)
-                        MinuteGrid(minutes: report.minutes, colors: colors)
-                    } else {
-                        RangeChart(report: report)
-                    }
-
-                    Picker("Список", selection: $tab) {
-                        ForEach(ListTab.allCases.filter { $0 != .timeline || report.range == .day }) { tab in
-                            Text(tab.rawValue).tag(tab)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-
-                    switch effectiveTab(for: report) {
-                    case .apps: AppsList(report: report, colors: colors)
-                    case .sites: SitesList(report: report)
-                    case .timeline: TimelineList(sessions: report.sessions, colors: colors)
-                    }
-                } else if let error = stats.error {
-                    Text(error).foregroundStyle(.red)
-                } else {
-                    ProgressView().frame(maxWidth: .infinity)
-                }
-            }
-            .padding(14)
+        .onDisappear { isOpen = false }
+        .onReceive(tracker.$todayTotal) { _ in
+            // Keep the numbers in step with the menu bar counter while the window is open.
+            if isOpen && !showSettings { stats.refreshIfLive() }
         }
-    }
-
-    private func effectiveTab(for report: Report) -> ListTab {
-        tab == .timeline && report.range != .day ? .apps : tab
     }
 
     private var footer: some View {
         HStack(spacing: 14) {
-            Button {
-                tracker.setPaused(!settings.isPaused)
-            } label: {
-                Label(settings.isPaused ? "Продолжить" : "Пауза",
-                      systemImage: settings.isPaused ? "play.fill" : "pause.fill")
-            }
+            PauseButton()
             Spacer()
+            Button {
+                MainWindowController.shared.show()
+            } label: {
+                Label("Окно", systemImage: "macwindow")
+            }
             Button {
                 showSettings.toggle()
                 if !showSettings { stats.reload() }
@@ -122,28 +77,26 @@ struct PopoverView: View {
                 Label(showSettings ? "Статистика" : "Настройки",
                       systemImage: showSettings ? "chart.bar.xaxis" : "gearshape")
             }
-            Button {
-                NSApp.terminate(nil)
-            } label: {
-                Label("Выйти", systemImage: "power")
-            }
+            QuitButton()
         }
         .buttonStyle(.borderless)
     }
 }
 
-/// Today's total and what is being recorded right now.
+/// Today's total and the recording status.
 struct StatusHeader: View {
+    var large = false
+
     @EnvironmentObject private var tracker: Tracker
 
     var body: some View {
-        HStack(alignment: .top) {
+        HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Сегодня за компьютером")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text(Format.duration(tracker.todayTotal))
-                    .font(.system(size: 26, weight: .semibold, design: .rounded))
+                    .font(.system(size: large ? 34 : 26, weight: .semibold, design: .rounded))
                     .monospacedDigit()
             }
             Spacer(minLength: 16)
@@ -151,19 +104,6 @@ struct StatusHeader: View {
                 HStack(spacing: 5) {
                     Circle().fill(statusColor).frame(width: 7, height: 7)
                     Text(statusText).font(.caption).foregroundStyle(.secondary)
-                }
-                if let current = tracker.current {
-                    Text(current.appName)
-                        .font(.callout.weight(.medium))
-                        .lineLimit(1)
-                    let detail = current.domain.isEmpty ? current.title : current.domain
-                    if !detail.isEmpty {
-                        Text(detail)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
                 }
                 if let error = tracker.lastError {
                     Text(error).font(.caption).foregroundStyle(.red).lineLimit(2)
@@ -179,6 +119,7 @@ struct StatusHeader: View {
         case .idle: return "Не за компьютером"
         case .paused: return "Пауза"
         case .away: return "Экран заблокирован"
+        case .privateWindow: return "Приватное окно — не записываю"
         }
     }
 
@@ -186,12 +127,29 @@ struct StatusHeader: View {
         switch tracker.state {
         case .active: return .green
         case .idle: return .yellow
-        case .paused, .away: return .gray
+        case .paused, .away, .privateWindow: return .gray
         }
     }
 }
 
-/// "‹ 16 окт – 22 окт ›" with a jump back to today.
+/// Period picker + "‹ 16 окт – 22 окт ›".
+struct StatsControls: View {
+    @EnvironmentObject private var stats: StatsModel
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Picker("Период", selection: $stats.range) {
+                ForEach(StatsRange.allCases) { range in
+                    Text(range.title).tag(range)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            PeriodBar()
+        }
+    }
+}
+
 struct PeriodBar: View {
     @EnvironmentObject private var stats: StatsModel
 
@@ -213,6 +171,81 @@ struct PeriodBar: View {
             }
         }
         .buttonStyle(.borderless)
+    }
+}
+
+/// Summary numbers and charts of a report.
+struct ReportOverview: View {
+    enum Style {
+        case compact   // menu bar window
+        case wide      // main window
+
+        var hourlyHeight: CGFloat { self == .compact ? 130 : 220 }
+        var rangeHeight: CGFloat { self == .compact ? 150 : 260 }
+        var minuteRowHeight: CGFloat { self == .compact ? 7 : 13 }
+    }
+
+    let report: Report
+    let style: Style
+
+    var body: some View {
+        let colors = AppColors(apps: report.apps)
+        VStack(alignment: .leading, spacing: 14) {
+            SummaryRow(report: report)
+            if report.range == .day {
+                HourlyChart(slices: report.hourly, colors: colors, height: style.hourlyHeight)
+                MinuteGrid(minutes: report.minutes, colors: colors, rowHeight: style.minuteRowHeight)
+            } else {
+                RangeChart(report: report, height: style.rangeHeight)
+            }
+        }
+    }
+}
+
+/// Apps / sites / timeline tabs for a report.
+struct ReportLists: View {
+    let report: Report
+
+    @State private var tab: ListTab = .apps
+
+    enum ListTab: String, CaseIterable, Identifiable {
+        case apps = "Приложения"
+        case sites = "Сайты"
+        case timeline = "Хронология"
+
+        var id: String { rawValue }
+    }
+
+    var body: some View {
+        let colors = AppColors(apps: report.apps)
+        let current = tab == .timeline && report.range != .day ? .apps : tab
+        VStack(alignment: .leading, spacing: 12) {
+            Picker("Список", selection: $tab) {
+                ForEach(ListTab.allCases.filter { $0 != .timeline || report.range == .day }) { item in
+                    Text(item.rawValue).tag(item)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            switch current {
+            case .apps: AppsList(report: report, colors: colors)
+            case .sites: SitesList(report: report)
+            case .timeline: TimelineList(sessions: report.sessions, colors: colors)
+            }
+        }
+    }
+}
+
+struct ReportPlaceholder: View {
+    @EnvironmentObject private var stats: StatsModel
+
+    var body: some View {
+        if let error = stats.error {
+            Text(error).foregroundStyle(.red)
+        } else {
+            ProgressView().frame(maxWidth: .infinity)
+        }
     }
 }
 
@@ -238,6 +271,31 @@ struct SummaryRow: View {
             Text(value).font(.title3.weight(.semibold)).monospacedDigit()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct PauseButton: View {
+    @EnvironmentObject private var tracker: Tracker
+    @EnvironmentObject private var settings: Settings
+
+    var body: some View {
+        Button {
+            tracker.setPaused(!settings.isPaused)
+        } label: {
+            Label(settings.isPaused ? "Продолжить" : "Пауза",
+                  systemImage: settings.isPaused ? "play.fill" : "pause.fill")
+        }
+    }
+}
+
+/// Really quits (stops recording), unlike ⌘Q in the main window which only closes it.
+struct QuitButton: View {
+    var body: some View {
+        Button {
+            AppDelegate.quitForReal()
+        } label: {
+            Label("Выйти", systemImage: "power")
+        }
     }
 }
 

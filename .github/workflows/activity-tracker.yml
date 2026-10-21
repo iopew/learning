@@ -7,9 +7,15 @@ on:
       - ".github/workflows/activity-tracker.yml"
   workflow_dispatch:
 
+permissions:
+  contents: write   # publishing releases (the app updates itself from them)
+
 jobs:
   build:
     runs-on: macos-15
+    env:
+      BUILD_NUMBER: ${{ github.run_number }}
+      BUNDLE_ID: com.iopew.ActivityTracker
     defaults:
       run:
         working-directory: ActivityTracker
@@ -22,30 +28,118 @@ jobs:
       - name: Unit tests
         run: swift test
 
-      - name: Build app bundle
-        run: UNIVERSAL=1 ./build.sh
+      - name: Build release app (ad-hoc signed; re-signed on the user's Mac)
+        run: UNIVERSAL=1 SIGN=adhoc ./build.sh
 
       - name: Check bundle
         run: |
-          plutil -lint .build/ActivityTracker.app/Contents/Info.plist
-          codesign --verify --verbose .build/ActivityTracker.app
-          lipo -info .build/ActivityTracker.app/Contents/MacOS/ActivityTracker
+          APP=.build/ActivityTracker.app
+          plutil -lint "$APP/Contents/Info.plist"
+          codesign --verify --strict --verbose "$APP"
+          lipo -info "$APP/Contents/MacOS/ActivityTracker"
+          test -f "$APP/Contents/Resources/AppIcon.icns"
+          test -x "$APP/Contents/Resources/local-sign.sh"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")" = "$BUILD_NUMBER"
 
       - name: Probe collectors and database
         run: .build/ActivityTracker.app/Contents/MacOS/ActivityTracker --probe
 
-      - name: Launch the app and make sure it keeps running
-        run: |
-          open .build/ActivityTracker.app
-          sleep 20
-          pgrep -x ActivityTracker
-          ls -la "$HOME/Library/Application Support/ActivityTracker/"
-          pkill -x ActivityTracker
-
       - name: Package
         run: ditto -c -k --keepParent .build/ActivityTracker.app .build/ActivityTracker.zip
+
+      - name: Stable local signature across builds
+        run: |
+          set -x
+          rm -rf /tmp/sig && mkdir -p /tmp/sig/a /tmp/sig/b
+          ditto .build/ActivityTracker.app /tmp/sig/a/ActivityTracker.app
+          ditto .build/ActivityTracker.app /tmp/sig/b/ActivityTracker.app
+          if bash Resources/local-sign.sh --check /tmp/sig/a/ActivityTracker.app; then
+            echo "ad-hoc build must not pass the local-identity check"; exit 1
+          fi
+          bash Resources/local-sign.sh /tmp/sig/a/ActivityTracker.app    # creates the identity
+          bash Resources/local-sign.sh /tmp/sig/b/ActivityTracker.app    # reuses it
+          bash Resources/local-sign.sh --check /tmp/sig/a/ActivityTracker.app
+          a="$(codesign -d -r- /tmp/sig/a/ActivityTracker.app 2>/dev/null)"
+          b="$(codesign -d -r- /tmp/sig/b/ActivityTracker.app 2>/dev/null)"
+          echo "$a"
+          test "$a" = "$b"
+          echo "$a" | grep -q "certificate leaf"
+          # the signing keychain must not be left in the user's keychain search list
+          security list-keychains -d user
+          if security list-keychains -d user | grep -q "ActivityTracker"; then exit 1; fi
+
+      - name: Hand-installed old build adopts the local signature, then updates itself
+        run: |
+          set -x
+          APPS=/Applications/ActivityTracker.app
+          version() { /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APPS/Contents/Info.plist"; }
+          defaults write "$BUNDLE_ID" checkForUpdates -bool false
+
+          # Build "1", ad-hoc signed, installed by hand.
+          rm -rf /tmp/old && mkdir /tmp/old
+          ditto .build/ActivityTracker.app /tmp/old/ActivityTracker.app
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1" /tmp/old/ActivityTracker.app/Contents/Info.plist
+          codesign --force --sign - /tmp/old/ActivityTracker.app
+          rm -rf "$APPS"
+          ditto /tmp/old/ActivityTracker.app "$APPS"
+          open "$APPS"
+
+          # Adoption: it re-signs itself with the stable identity and restarts.
+          for i in $(seq 1 60); do
+            if bash Resources/local-sign.sh --check "$APPS" && pgrep -x ActivityTracker; then break; fi
+            sleep 1
+          done
+          sleep 8
+          bash Resources/local-sign.sh --check "$APPS"
+          test "$(version)" = 1
+          pgrep -x ActivityTracker
+          before="$(codesign -d -r- "$APPS" 2>/dev/null)"
+
+          # Update to this build through the same path the updater uses.
+          "$APPS/Contents/MacOS/ActivityTracker" --update-from-zip "$PWD/.build/ActivityTracker.zip"
+          for i in $(seq 1 90); do
+            if [ "$(version)" = "$BUILD_NUMBER" ] && pgrep -x ActivityTracker; then break; fi
+            sleep 1
+          done
+          sleep 10
+          test "$(version)" = "$BUILD_NUMBER"
+          pgrep -x ActivityTracker
+          ps -o pid,command -p "$(pgrep -x ActivityTracker | tr '\n' ',' | sed 's/,$//')"
+          after="$(codesign -d -r- "$APPS" 2>/dev/null)"
+          test "$before" = "$after"   # same identity → macOS keeps the permissions
+
+      - name: Resource usage of the running app (1 minute)
+        run: |
+          pid="$(pgrep -x ActivityTracker | head -1)"
+          ps -o pid,rss,time,%cpu -p "$pid"
+          top -l 3 -s 30 -pid "$pid" -stats pid,command,cpu,mem,power | tail -n 4
+          ps -o pid,rss,time,%cpu -p "$pid"
+
+      - name: Update log
+        if: always()
+        run: cat "$HOME/Library/Logs/ActivityTracker/update.log" || true
+
+      - name: Stop the app
+        if: always()
+        run: pkill -x ActivityTracker || true
 
       - uses: actions/upload-artifact@v4
         with:
           name: ActivityTracker
           path: ActivityTracker/.build/ActivityTracker.zip
+
+      - name: Publish release (the app updates itself from these)
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/claude/'))
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="activity-tracker-build-$BUILD_NUMBER"
+          notes="$(git log -1 --format=%s)
+
+          Ветка ${GITHUB_REF_NAME}, коммит ${GITHUB_SHA::7}."
+          gh release create "$tag" .build/ActivityTracker.zip --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "ActivityTracker — сборка $BUILD_NUMBER" --notes "$notes"
+          # Keep the five newest builds.
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq '.[].tagName' \
+            | grep '^activity-tracker-build-' | sort -t- -k4 -n -r | tail -n +6 \
+            | while read -r old; do gh release delete "$old" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag; done

@@ -14,13 +14,22 @@ final class StatsModel: ObservableObject {
     private let store: ActivityStore
     private let queue = DispatchQueue(label: "ActivityTracker.stats", qos: .userInitiated)
     private var generation = 0
+    private var lastLoad = Date.distantPast
 
     init(store: ActivityStore) {
         self.store = store
         self.days = store.days
     }
 
+    /// Called on every tracker tick while a stats view is visible. Periods that include today change as you work:
+    /// the day view refreshes every tick, longer (heavier) periods at most once a minute.
+    func refreshIfLive() {
+        guard isAtToday else { return }
+        if range == .day || Date().timeIntervalSince(lastLoad) >= 60 { reload() }
+    }
+
     func reload() {
+        lastLoad = Date()
         generation += 1
         let request = (generation: generation, range: range, anchor: anchor)
         queue.async { [store] in

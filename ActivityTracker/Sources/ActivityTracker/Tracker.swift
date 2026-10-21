@@ -9,6 +9,7 @@ final class Tracker: ObservableObject {
         case idle
         case paused
         case away   // screen locked, display asleep, system asleep, another user session
+        case privateWindow   // incognito / private browsing: nothing is recorded
     }
 
     static let interval: TimeInterval = 5
@@ -82,12 +83,19 @@ final class Tracker: ObservableObject {
         if bundleID == Bundle.main.bundleIdentifier { return }
 
         var sample = Sample(bundleID: bundleID, appName: app.localizedName ?? bundleID)
-        if settings.recordTitles {
-            sample.title = String(WindowTitle.focusedWindowTitle(of: app.processIdentifier).prefix(300))
+        let isBrowser = BrowserURL.isBrowser(bundleID)
+        // Browsers' titles are read even when titles aren't recorded: Firefox shows private windows only there.
+        let title = settings.recordTitles || isBrowser
+            ? String(WindowTitle.focusedWindowTitle(of: app.processIdentifier).prefix(300)) : ""
+        if isBrowser {
+            let url = BrowserURL.currentURL(bundleID: bundleID)
+            // Private windows leave no trace at all: not the time, not the site, not the title.
+            if url == BrowserURL.privateMarker || BrowserURL.isPrivateWindowTitle(title, bundleID: bundleID) {
+                return pause(.privateWindow, at: now)
+            }
+            if settings.recordURLs { sample.url = String(url.prefix(2000)) }
         }
-        if settings.recordURLs && BrowserURL.isBrowser(bundleID) {
-            sample.url = String(BrowserURL.currentURL(bundleID: bundleID).prefix(2000))
-        }
+        if settings.recordTitles { sample.title = title }
 
         do {
             try store.record(sample, at: now, interval: Self.interval)
