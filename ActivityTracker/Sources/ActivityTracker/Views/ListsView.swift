@@ -32,7 +32,7 @@ struct AppsList: View {
                         if inside { hovered = app.bundleID } else if hovered == app.bundleID { hovered = nil }
                     }
                     .contextMenu {
-                        Button("Удалить все данные о «\(app.appName)»…") {
+                        Button(L.tr("Удалить все данные о «\(app.appName)»…", "Delete all data about “\(app.appName)”…")) {
                             DataEraser.confirmAndErase(.app(app.bundleID))
                         }
                     }
@@ -62,7 +62,7 @@ struct SitesList: View {
     var body: some View {
         LazyVStack(alignment: .leading, spacing: 8) {
             if report.domains.isEmpty {
-                EmptyNote(text: "Сайтов пока нет. Адреса берутся из Safari, Chrome, Arc, Brave, Edge, Яндекс Браузера и др.")
+                EmptyNote(text: L.tr("Сайтов пока нет. Адреса берутся из Safari, Chrome, Arc, Brave, Edge, Яндекс Браузера и др.", "No sites yet. Addresses come from Safari, Chrome, Arc, Brave, Edge, Yandex Browser and others."))
             }
             let browsing = report.domains.reduce(0) { $0 + $1.seconds }
             ForEach(report.domains) { site in
@@ -75,13 +75,13 @@ struct SitesList: View {
                     if inside { hovered = site.domain } else if hovered == site.domain { hovered = nil }
                 }
                 .contextMenu {
-                    Button("Удалить все данные о \(site.domain)…") {
+                    Button(L.tr("Удалить все данные о \(site.domain)…", "Delete all data about \(site.domain)…")) {
                         DataEraser.confirmAndErase(.domain(site.domain))
                     }
                 }
             }
             if !report.domains.isEmpty {
-                Text("Наведи на сайт и нажми корзину (или правый клик), чтобы удалить всё о нём.")
+                Text(L.tr("Наведи на сайт и нажми корзину (или правый клик), чтобы удалить всё о нём.", "Hover over a site and click the trash (or right-click) to delete everything about it."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -105,7 +105,7 @@ struct TimelineList: View {
     var body: some View {
         let visible = Array((showShort ? sessions : sessions.filter { $0.duration >= 60 }).reversed())
         VStack(alignment: .leading, spacing: 8) {
-            Toggle("Показывать короткие (меньше минуты)", isOn: $showShort)
+            Toggle(L.tr("Показывать короткие (меньше минуты)", "Show short ones (under a minute)"), isOn: $showShort)
                 .toggleStyle(.checkbox)
                 .font(.caption)
             if visible.isEmpty { EmptyNote() }
@@ -146,6 +146,11 @@ struct UsageRow: View {
     let total: TimeInterval
     /// nil: nothing to expand; otherwise shows a disclosure chevron.
     var expanded: Bool? = nil
+    /// Overrides for rows that aren't about time (energy): the shown value and the bar share (0…1).
+    var valueText: String? = nil
+    var share: Double? = nil
+
+    private var fraction: Double { share ?? (total > 0 ? seconds / total : 0) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -158,8 +163,8 @@ struct UsageRow: View {
                         .foregroundStyle(.tertiary)
                 }
                 Spacer()
-                Text(Format.duration(seconds)).monospacedDigit()
-                Text(Format.percent(seconds, of: total))
+                Text(valueText ?? Format.duration(seconds)).monospacedDigit()
+                Text(Format.percent(fraction, of: 1))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(width: 34, alignment: .trailing)
@@ -167,7 +172,7 @@ struct UsageRow: View {
             GeometryReader { geometry in
                 Capsule()
                     .fill(color.opacity(0.75))
-                    .frame(width: max(2, geometry.size.width * (total > 0 ? seconds / total : 0)))
+                    .frame(width: max(2, geometry.size.width * fraction))
             }
             .frame(height: 3)
         }
@@ -175,7 +180,7 @@ struct UsageRow: View {
 }
 
 struct EmptyNote: View {
-    var text = "За этот период ничего не записано."
+    var text = L.tr("За этот период ничего не записано.", "Nothing recorded in this period.")
 
     var body: some View {
         Text(text)

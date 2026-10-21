@@ -13,8 +13,8 @@ struct HourlyChart: View {
     var body: some View {
         Chart(slices) { slice in
             BarMark(
-                x: .value("Час", Self.hours[slice.hour]),
-                y: .value("Минуты", slice.seconds / 60)
+                x: .value(L.tr("Час", "Hour"), Self.hours[slice.hour]),
+                y: .value(L.tr("Минуты", "Minutes"), slice.seconds / 60)
             )
             .foregroundStyle(colors.color(slice.bundleID))
         }
@@ -27,7 +27,7 @@ struct HourlyChart: View {
             AxisMarks(values: [0.0, 15.0, 30.0, 45.0, 60.0]) { value in
                 AxisGridLine()
                 AxisValueLabel {
-                    if let minutes = value.as(Double.self) { Text("\(Int(minutes))м") }
+                    if let minutes = value.as(Double.self) { Text(L.tr("\(Int(minutes))м", "\(Int(minutes))m")) }
                 }
             }
         }
@@ -43,19 +43,19 @@ struct RangeChart: View {
     var body: some View {
         let unit: Calendar.Component = report.bucketUnit == .day ? .day : .weekOfYear
         VStack(alignment: .leading, spacing: 4) {
-            Text(report.bucketUnit == .day ? "Часов в день" : "Часов в неделю")
+            Text(report.bucketUnit == .day ? L.tr("Часов в день", "Hours per day") : L.tr("Часов в неделю", "Hours per week"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Chart {
                 ForEach(report.buckets) { bucket in
                     BarMark(
-                        x: .value("Дата", bucket.start, unit: unit),
-                        y: .value("Часы", bucket.seconds / 3600)
+                        x: .value(L.tr("Дата", "Date"), bucket.start, unit: unit),
+                        y: .value(L.tr("Часы", "Hours"), bucket.seconds / 3600)
                     )
                     .foregroundStyle(Color.accentColor.gradient)
                 }
                 if report.bucketUnit == .day && report.activeDays > 0 {
-                    RuleMark(y: .value("Среднее", report.averagePerActiveDay / 3600))
+                    RuleMark(y: .value(L.tr("Среднее", "Average"), report.averagePerActiveDay / 3600))
                         .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
                         .foregroundStyle(.secondary)
                 }
@@ -73,8 +73,9 @@ struct RangeChart: View {
     }
 
     private static func axisLabel(_ hours: Double) -> String {
-        if hours == hours.rounded() { return "\(Int(hours))ч" }
-        return "\(Int((hours * 60).rounded()))м"
+        if hours == hours.rounded() { return L.tr("\(Int(hours))ч", "\(Int(hours))h") }
+        let minutes = Int((hours * 60).rounded())
+        return L.tr("\(minutes)м", "\(minutes)m")
     }
 }
 
@@ -91,7 +92,7 @@ struct MinuteGrid: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text("Каждая минута дня")
+                Text(L.tr("Каждая минута дня", "Every minute of the day"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -135,7 +136,7 @@ struct MinuteGrid: View {
     }
 
     private var hoverText: String {
-        guard let hovered else { return "наведите на клетку" }
+        guard let hovered else { return L.tr("наведите на клетку", "hover over a cell") }
         let time = String(format: "%02d:%02d", hovered / 60, hovered % 60)
         guard hovered < minutes.count, let cell = minutes[hovered] else { return "\(time) · —" }
         return "\(time) · \(cell.appName) · \(Format.duration(cell.seconds))"

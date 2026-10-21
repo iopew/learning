@@ -20,6 +20,18 @@ enum Probe {
             print("frontmost app:      none")
         }
         print("idle seconds:       \(Int(Idle.secondsSinceLastInput()))")
+        if let battery = BatteryReader.read() {
+            print("battery:            \(Int(battery.percent))%, on AC: \(battery.onAC), charging: \(battery.charging), "
+                  + "watts: \(battery.watts.map { String(format: "%.1f", $0) } ?? "?"), cycles: \(battery.cycleCount ?? -1), "
+                  + "health: \(battery.health.map { String(format: "%.0f%%", $0) } ?? "?")")
+        } else {
+            print("battery:            none")
+        }
+        let energy = EnergyMeter()
+        energy.baseline()
+        Thread.sleep(forTimeInterval: 1)
+        let apps = energy.collect().sorted { $0.joules > $1.joules }.prefix(3)
+        print("energy (1 s):       \(apps.map { "\($0.appName) \(String(format: "%.3f", $0.joules)) J" })")
         print("display kept awake: \(Idle.isDisplaySleepPrevented())")
 
         let path = FileManager.default.temporaryDirectory

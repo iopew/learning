@@ -8,9 +8,9 @@ enum DataEraser {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = question(for: what)
-        alert.informativeText = "Данные удаляются насовсем, вместе с заголовками и адресами. Отменить нельзя."
-        alert.addButton(withTitle: "Удалить")
-        alert.addButton(withTitle: "Отмена")
+        alert.informativeText = L.tr("Данные удаляются насовсем, вместе с заголовками и адресами. Отменить нельзя.", "Data is deleted for good, with titles and addresses. This cannot be undone.")
+        alert.addButton(withTitle: L.tr("Удалить", "Delete"))
+        alert.addButton(withTitle: L.tr("Отмена", "Cancel"))
         alert.buttons.first?.hasDestructiveAction = true
         NSApp.activate(ignoringOtherApps: true)
         guard alert.runModal() == .alertFirstButtonReturn else { return }
@@ -19,16 +19,16 @@ enum DataEraser {
 
     private static func question(for what: ActivityStore.Erase) -> String {
         switch what {
-        case .domain(let domain): return "Удалить всё, что записано о \(domain)?"
+        case .domain(let domain): return L.tr("Удалить всё, что записано о \(domain)?", "Delete everything recorded about \(domain)?")
         case .app(let bundleID):
             let name = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)?
                 .deletingPathExtension().lastPathComponent ?? bundleID
-            return "Удалить всё, что записано о «\(name)»?"
+            return L.tr("Удалить всё, что записано о «\(name)»?", "Delete everything recorded about “\(name)”?")
         case .since(let moment):
             let formatter = DateFormatter()
             formatter.dateFormat = "HH:mm"
-            return "Забыть всё, что записано после \(formatter.string(from: moment))?"
-        case .all: return "Удалить всю историю активности?"
+            return L.tr("Забыть всё, что записано после \(formatter.string(from: moment))?", "Forget everything recorded after \(formatter.string(from: moment))?")
+        case .all: return L.tr("Удалить всю историю активности?", "Delete the whole activity history?")
         }
     }
 }
@@ -37,13 +37,13 @@ enum DataEraser {
 struct ForgetMenu: View {
     var body: some View {
         Menu {
-            Button("Последние 15 минут") { DataEraser.confirmAndErase(.since(Date().addingTimeInterval(-15 * 60))) }
-            Button("Последний час") { DataEraser.confirmAndErase(.since(Date().addingTimeInterval(-3600))) }
-            Button("Сегодня") { DataEraser.confirmAndErase(.since(Calendar.current.startOfDay(for: Date()))) }
+            Button(L.tr("Последние 15 минут", "Last 15 minutes")) { DataEraser.confirmAndErase(.since(Date().addingTimeInterval(-15 * 60))) }
+            Button(L.tr("Последний час", "Last hour")) { DataEraser.confirmAndErase(.since(Date().addingTimeInterval(-3600))) }
+            Button(L.tr("Сегодня", "Today")) { DataEraser.confirmAndErase(.since(Calendar.current.startOfDay(for: Date()))) }
             Divider()
-            Button("Всю историю…") { DataEraser.confirmAndErase(.all) }
+            Button(L.tr("Всю историю…", "Entire history…")) { DataEraser.confirmAndErase(.all) }
         } label: {
-            Label("Забыть", systemImage: "eye.slash")
+            Label(L.tr("Забыть", "Forget"), systemImage: "eye.slash")
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
@@ -63,7 +63,7 @@ struct RowEraseButton: View {
                 .foregroundStyle(.secondary)
         }
         .buttonStyle(.borderless)
-        .help("Удалить все данные")
+        .help(L.tr("Удалить все данные", "Delete all data"))
         .opacity(isVisible ? 1 : 0)
         .allowsHitTesting(isVisible)
     }

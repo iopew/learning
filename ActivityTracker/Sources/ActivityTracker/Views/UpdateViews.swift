@@ -12,7 +12,7 @@ struct UpdateBanner: View {
             box(tint: .accentColor) {
                 Image(systemName: "arrow.down.circle.fill").foregroundStyle(Color.accentColor)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Доступна новая версия — сборка \(update.build)")
+                    Text(L.tr("Доступна новая версия — сборка \(update.build)", "New version available — build \(update.build)"))
                         .font(.callout.weight(.medium))
                     if let note = Self.firstLine(update.notes) {
                         Text(note)
@@ -22,19 +22,19 @@ struct UpdateBanner: View {
                     }
                 }
                 Spacer()
-                Button("Обновить") { updater.install(update) }
+                Button(L.tr("Обновить", "Update")) { updater.install(update) }
                     .disabled(!updater.canInstall)
             }
         case .downloading(let build):
             box(tint: .accentColor) {
                 ProgressView().controlSize(.small)
-                Text("Скачиваю сборку \(build)…").font(.callout)
+                Text(L.tr("Скачиваю сборку \(build)…", "Downloading build \(build)…")).font(.callout)
                 Spacer()
             }
         case .installing(let build):
             box(tint: .accentColor) {
                 ProgressView().controlSize(.small)
-                Text("Устанавливаю сборку \(build), приложение перезапустится…").font(.callout)
+                Text(L.tr("Устанавливаю сборку \(build), приложение перезапустится…", "Installing build \(build), the app will restart…")).font(.callout)
                 Spacer()
             }
         case .failed(let message):
@@ -42,7 +42,7 @@ struct UpdateBanner: View {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                 Text(message).font(.caption).lineLimit(3)
                 Spacer()
-                Button("Ещё раз") { updater.check(userInitiated: true) }
+                Button(L.tr("Ещё раз", "Retry")) { updater.check(userInitiated: true) }
             }
         case .idle, .checking, .upToDate:
             EmptyView()
@@ -70,16 +70,16 @@ struct UpdateSettings: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Обновления").font(.headline)
-            Toggle("Проверять обновления (раз в 30 минут, GitHub)", isOn: $settings.checkForUpdates)
-            Toggle("Устанавливать автоматически", isOn: $settings.autoUpdate)
+            Text(L.tr("Обновления", "Updates")).font(.headline)
+            Toggle(L.tr("Проверять обновления (раз в 30 минут, GitHub)", "Check for updates (every 30 minutes, GitHub)"), isOn: $settings.checkForUpdates)
+            Toggle(L.tr("Устанавливать автоматически", "Install automatically"), isOn: $settings.autoUpdate)
                 .disabled(!settings.checkForUpdates)
             HStack {
-                Text("Версия \(updater.currentVersion) (сборка \(updater.currentBuild))")
+                Text(L.tr("Версия \(updater.currentVersion) (сборка \(updater.currentBuild))", "Version \(updater.currentVersion) (build \(updater.currentBuild))"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button("Проверить сейчас") { updater.check(userInitiated: true) }
+                Button(L.tr("Проверить сейчас", "Check now")) { updater.check(userInitiated: true) }
                     .disabled(updater.isBusy)
             }
             Text(statusText)
@@ -87,15 +87,15 @@ struct UpdateSettings: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if !updater.canInstall {
-                Text("Чтобы обновляться, приложение должно лежать в папке «Программы».")
+                Text(L.tr("Чтобы обновляться, приложение должно лежать в папке «Программы».", "To update, the app must be in the Applications folder."))
                     .font(.caption)
                     .foregroundStyle(.orange)
             }
-            Button("Журнал обновлений") {
+            Button(L.tr("Журнал обновлений", "Update log")) {
                 NSWorkspace.shared.open(Installer.logURL)
             }
             .disabled(!FileManager.default.fileExists(atPath: Installer.logURL.path))
-            Text("Приложение отправляет только запрос «какая версия последняя» на GitHub. Ваши данные никуда не уходят.")
+            Text(L.tr("Приложение отправляет только запрос «какая версия последняя» на GitHub. Ваши данные никуда не уходят.", "The app only asks GitHub which version is the latest. Your data never leaves the Mac."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -105,13 +105,13 @@ struct UpdateSettings: View {
     private var statusText: String {
         switch updater.phase {
         case .idle:
-            if let lastCheck = updater.lastCheck { return "Последняя проверка: \(Self.time(lastCheck))" }
-            return "Ещё не проверялось"
-        case .checking: return "Проверяю…"
-        case .upToDate: return "Установлена последняя версия" + (updater.lastCheck.map { " (проверено в \(Self.time($0)))" } ?? "")
-        case .available(let update): return "Доступна сборка \(update.build)"
-        case .downloading(let build): return "Скачиваю сборку \(build)…"
-        case .installing(let build): return "Устанавливаю сборку \(build)…"
+            if let lastCheck = updater.lastCheck { return L.tr("Последняя проверка: \(Self.time(lastCheck))", "Last check: \(Self.time(lastCheck))") }
+            return L.tr("Ещё не проверялось", "Not checked yet")
+        case .checking: return L.tr("Проверяю…", "Checking…")
+        case .upToDate: return L.tr("Установлена последняя версия", "Up to date") + (updater.lastCheck.map { L.tr(" (проверено в \(Self.time($0)))", " (checked at \(Self.time($0)))") } ?? "")
+        case .available(let update): return L.tr("Доступна сборка \(update.build)", "Build \(update.build) available")
+        case .downloading(let build): return L.tr("Скачиваю сборку \(build)…", "Downloading build \(build)…")
+        case .installing(let build): return L.tr("Устанавливаю сборку \(build)…", "Installing build \(build)…")
         case .failed(let message): return message
         }
     }

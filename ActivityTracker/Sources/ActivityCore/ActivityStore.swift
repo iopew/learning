@@ -192,6 +192,36 @@ public final class ActivityStore {
 
     // MARK: - Reports
 
+    /// The usual day over the `count` days before `day`, averaged over the days that had any activity.
+    public func baseline(days count: Int = 14, before day: Date) throws -> UsageBaseline {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let today = days.startOfDay(day)
+        let window: [SQLValue] = [.text(days.key(days.addingDays(-count, to: today))),
+                                  .text(days.key(days.addingDays(-1, to: today)))]
+        let totals = try db.query(
+            "SELECT COUNT(DISTINCT day), COALESCE(SUM(end_at - start_at), 0) FROM events WHERE day BETWEEN ? AND ?",
+            window) { (Int($0.int(0)), $0.double(1)) }.first ?? (0, 0)
+        guard totals.0 > 0 else { return UsageBaseline() }
+        let activeDays = Double(totals.0)
+
+        var apps: [String: TimeInterval] = [:]
+        for (bundleID, seconds) in try db.query(
+            "SELECT bundle_id, SUM(end_at - start_at) FROM events WHERE day BETWEEN ? AND ? GROUP BY bundle_id",
+            window, map: { ($0.text(0), $0.double(1)) }) {
+            apps[bundleID] = seconds / activeDays
+        }
+        var domains: [String: TimeInterval] = [:]
+        for (domain, seconds) in try db.query(
+            "SELECT domain, SUM(end_at - start_at) FROM events WHERE day BETWEEN ? AND ? AND domain != '' GROUP BY domain",
+            window, map: { ($0.text(0), $0.double(1)) }) {
+            domains[domain] = seconds / activeDays
+        }
+        return UsageBaseline(activeDays: totals.0, totalPerDay: totals.1 / activeDays, appsPerDay: apps,
+                             domainsPerDay: domains)
+    }
+
     /// Statistics for `range` ending on the day of `anchor` (for `.all`: from the first recorded day).
     public func report(range: StatsRange, anchor: Date) throws -> Report {
         lock.lock()

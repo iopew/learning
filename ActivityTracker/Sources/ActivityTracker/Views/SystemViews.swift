@@ -19,7 +19,7 @@ struct BatteryPanel: View {
                         (L.tr("Заряд", "Charge"), latest.batteryPercent.map { "\(Int($0.rounded()))%" } ?? "—"),
                         (L.tr("Сейчас", "Now"), stateText(latest)),
                         (L.tr("Здоровье", "Health"), latest.healthPercent.map { "\(Int($0.rounded()))%" } ?? "—"),
-                        (L.tr("Циклы", "Cycles"), latest.cycleCount.map(String.init) ?? "—"),
+                        (L.tr("Циклы", "Cycles"), latest.cycleCount.map { "\($0)" } ?? "—"),
                     ])
                 }
                 MetricGrid(items: [
@@ -32,7 +32,7 @@ struct BatteryPanel: View {
                     (L.tr("Мощность", "Power draw"), system.averageDischargeWatts.map { String(format: L.tr("%.1f Вт", "%.1f W"), $0) } ?? "—"),
                     (L.tr("Температура макс.", "Max temperature"), system.maxBatteryTemperature.map { String(format: "%.0f°C", $0) } ?? "—"),
                     (L.tr("На 100% от сети", "At 100% plugged in"), Format.duration(system.timeFullOnAC)),
-                    (L.tr("Циклов за период", "Cycles in period"), system.cyclesAdded.map(String.init) ?? "—"),
+                    (L.tr("Циклов за период", "Cycles in period"), system.cyclesAdded.map { "\($0)" } ?? "—"),
                 ])
 
                 if !system.batteryPoints.isEmpty {

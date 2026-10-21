@@ -46,14 +46,14 @@ public enum StatsRange: String, CaseIterable, Identifiable {
 
     public var title: String {
         switch self {
-        case .day: return "День"
-        case .week: return "7д"
-        case .month: return "30д"
-        case .days60: return "60д"
-        case .days90: return "90д"
-        case .days180: return "180д"
-        case .year: return "Год"
-        case .all: return "Всё"
+        case .day: return L.tr("День", "Day")
+        case .week: return L.tr("7д", "7d")
+        case .month: return L.tr("30д", "30d")
+        case .days60: return L.tr("60д", "60d")
+        case .days90: return L.tr("90д", "90d")
+        case .days180: return L.tr("180д", "180d")
+        case .year: return L.tr("Год", "Year")
+        case .all: return L.tr("Всё", "All")
         }
     }
 

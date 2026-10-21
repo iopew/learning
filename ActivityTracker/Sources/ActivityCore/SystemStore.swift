@@ -75,7 +75,7 @@ public final class SystemStore {
                 """,
                 [.double(at), .text(day), .double(interval), optional(sample.batteryPercent),
                  .int(sample.onAC ? 1 : 0), .int(sample.isCharging ? 1 : 0), optional(sample.batteryWatts),
-                 optional(sample.batteryTemperature), sample.cycleCount.map { .int(Int64($0)) } ?? .null,
+                 optional(sample.batteryTemperature), sample.cycleCount.map { SQLValue.int(Int64($0)) } ?? SQLValue.null,
                  optional(sample.healthPercent), .double(sample.cpuLoad), .double(sample.memoryUsed),
                  .double(sample.memoryTotal), .double(sample.swapUsed), .double(sample.diskFree),
                  .double(sample.diskTotal), .int(Int64(sample.thermalState))])

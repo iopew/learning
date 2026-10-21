@@ -33,6 +33,9 @@ struct PopoverView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         UpdateBanner()
+                        if !stats.tips.isEmpty {
+                            TipsPanel(tips: Array(stats.tips.prefix(2)))
+                        }
                         StatsControls()
                         if let report = stats.report {
                             ReportOverview(report: report, style: .compact)
@@ -69,13 +72,13 @@ struct PopoverView: View {
             Button {
                 MainWindowController.shared.show()
             } label: {
-                Label("Окно", systemImage: "macwindow")
+                Label(L.tr("Окно", "Window"), systemImage: "macwindow")
             }
             Button {
                 showSettings.toggle()
                 if !showSettings { stats.reload() }
             } label: {
-                Label(showSettings ? "Статистика" : "Настройки",
+                Label(showSettings ? L.tr("Статистика", "Statistics") : L.tr("Настройки", "Settings"),
                       systemImage: showSettings ? "chart.bar.xaxis" : "gearshape")
             }
             QuitButton()
@@ -93,7 +96,7 @@ struct StatusHeader: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 0) {
-                Text("Сегодня за компьютером")
+                Text(L.tr("Сегодня за компьютером", "At the computer today"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text(Format.duration(tracker.todayTotal))
@@ -116,11 +119,11 @@ struct StatusHeader: View {
 
     private var statusText: String {
         switch tracker.state {
-        case .active: return "Записываю"
-        case .idle: return "Не за компьютером"
-        case .paused: return "Пауза"
-        case .away: return "Экран заблокирован"
-        case .privateWindow: return "Приватное окно — не записываю"
+        case .active: return L.tr("Записываю", "Recording")
+        case .idle: return L.tr("Не за компьютером", "Away")
+        case .paused: return L.tr("Пауза", "Paused")
+        case .away: return L.tr("Экран заблокирован", "Screen locked")
+        case .privateWindow: return L.tr("Приватное окно — не записываю", "Private window — not recording")
         }
     }
 
@@ -139,7 +142,7 @@ struct StatsControls: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            Picker("Период", selection: $stats.range) {
+            Picker(L.tr("Период", "Period"), selection: $stats.range) {
                 ForEach(StatsRange.allCases) { range in
                     Text(range.title).tag(range)
                 }
@@ -164,7 +167,7 @@ struct PeriodBar: View {
                 .frame(maxWidth: .infinity)
             if stats.canStep {
                 if !stats.isAtToday {
-                    Button("Сегодня") { stats.goToToday() }
+                    Button(L.tr("Сегодня", "Today")) { stats.goToToday() }
                         .font(.caption)
                 }
                 Button { stats.step(1) } label: { Image(systemName: "chevron.right") }
@@ -210,20 +213,26 @@ struct ReportLists: View {
     @State private var tab: ListTab = .apps
 
     enum ListTab: String, CaseIterable, Identifiable {
-        case apps = "Приложения"
-        case sites = "Сайты"
-        case timeline = "Хронология"
+        case apps, sites, timeline
 
         var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .apps: return L.tr("Приложения", "Apps")
+            case .sites: return L.tr("Сайты", "Sites")
+            case .timeline: return L.tr("Хронология", "Timeline")
+            }
+        }
     }
 
     var body: some View {
         let colors = AppColors(apps: report.apps)
         let current = tab == .timeline && report.range != .day ? .apps : tab
         VStack(alignment: .leading, spacing: 12) {
-            Picker("Список", selection: $tab) {
+            Picker(L.tr("Список", "List"), selection: $tab) {
                 ForEach(ListTab.allCases.filter { $0 != .timeline || report.range == .day }) { item in
-                    Text(item.rawValue).tag(item)
+                    Text(item.title).tag(item)
                 }
             }
             .pickerStyle(.segmented)
@@ -255,13 +264,13 @@ struct SummaryRow: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            metric("Всего", Format.duration(report.total))
+            metric(L.tr("Всего", "Total"), Format.duration(report.total))
             if report.range != .day {
-                metric("В среднем за день", Format.duration(report.averagePerActiveDay))
-                metric("Активных дней", "\(report.activeDays)")
+                metric(L.tr("В среднем за день", "Average per day"), Format.duration(report.averagePerActiveDay))
+                metric(L.tr("Активных дней", "Active days"), "\(report.activeDays)")
             } else {
-                metric("Приложений", "\(report.apps.count)")
-                metric("Сайтов", "\(report.domains.count)")
+                metric(L.tr("Приложений", "Apps"), "\(report.apps.count)")
+                metric(L.tr("Сайтов", "Sites"), "\(report.domains.count)")
             }
         }
     }
@@ -283,7 +292,7 @@ struct PauseButton: View {
         Button {
             tracker.setPaused(!settings.isPaused)
         } label: {
-            Label(settings.isPaused ? "Продолжить" : "Пауза",
+            Label(settings.isPaused ? L.tr("Продолжить", "Resume") : L.tr("Пауза", "Paused"),
                   systemImage: settings.isPaused ? "play.fill" : "pause.fill")
         }
     }
@@ -295,7 +304,7 @@ struct QuitButton: View {
         Button {
             AppDelegate.quitForReal()
         } label: {
-            Label("Выйти", systemImage: "power")
+            Label(L.tr("Выйти", "Quit"), systemImage: "power")
         }
     }
 }

@@ -92,7 +92,7 @@ final class Updater: ObservableObject {
         switch result {
         case .failure(let error):
             // Background checks fail quietly (offline, rate limit); the next one will retry.
-            phase = userInitiated ? .failed("Не удалось проверить обновления: \(error.localizedDescription)") : .idle
+            phase = userInitiated ? .failed(L.tr("Не удалось проверить обновления: \(error.localizedDescription)", "Could not check for updates: \(error.localizedDescription)")) : .idle
         case .success(nil):
             phase = .upToDate
         case .success(let update?):
@@ -109,7 +109,7 @@ final class Updater: ObservableObject {
     func install(_ update: AvailableUpdate) {
         guard !isBusy else { return }
         guard canInstall else {
-            phase = .failed("Обновление возможно только для приложения в папке «Программы».")
+            phase = .failed(L.tr("Обновление возможно только для приложения в папке «Программы».", "Updates work only for the app in the Applications folder."))
             return
         }
         phase = .downloading(update.build)
@@ -133,13 +133,13 @@ final class Updater: ObservableObject {
                 // The installer quits this app in a moment. If it doesn't, say so instead of spinning forever.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 90) {
                     if self.phase == .installing(update.build) {
-                        self.phase = .failed("Установщик не ответил. Подробности — в журнале обновлений.")
+                        self.phase = .failed(L.tr("Установщик не ответил. Подробности — в журнале обновлений.", "The installer did not respond. See the update log for details."))
                     }
                 }
             } catch {
                 Installer.log("update to \(update.build) failed: \(error)")
                 DispatchQueue.main.async {
-                    self.phase = .failed("Не удалось обновиться: \(error.localizedDescription)")
+                    self.phase = .failed(L.tr("Не удалось обновиться: \(error.localizedDescription)", "Update failed: \(error.localizedDescription)"))
                 }
             }
         }.resume()
@@ -154,10 +154,10 @@ enum UpdateError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .http(let status): return "сервер ответил \(status)"
-        case .badBundle(let reason): return "неверный пакет обновления: \(reason)"
-        case .command(let tool, let status, let output): return "\(tool) завершился с кодом \(status): \(output)"
-        case .notInstallable: return "приложение лежит не в папке «Программы»"
+        case .http(let status): return L.tr("сервер ответил \(status)", "server responded \(status)")
+        case .badBundle(let reason): return L.tr("неверный пакет обновления: \(reason)", "bad update package: \(reason)")
+        case .command(let tool, let status, let output): return L.tr("\(tool) завершился с кодом \(status): \(output)", "\(tool) exited with code \(status): \(output)")
+        case .notInstallable: return L.tr("приложение лежит не в папке «Программы»", "the app is not in the Applications folder")
         }
     }
 }
@@ -229,13 +229,14 @@ enum Installer {
 
         let app = folder.appendingPathComponent("ActivityTracker.app")
         guard let info = NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist")) else {
-            throw UpdateError.badBundle("нет Info.plist")
+            throw UpdateError.badBundle(L.tr("нет Info.plist", "no Info.plist"))
         }
         guard info["CFBundleIdentifier"] as? String == Bundle.main.bundleIdentifier else {
-            throw UpdateError.badBundle("чужой идентификатор \(info["CFBundleIdentifier"] ?? "?")")
+            let foreign = info["CFBundleIdentifier"] as? String ?? "?"
+            throw UpdateError.badBundle(L.tr("чужой идентификатор \(foreign)", "foreign bundle id \(foreign)"))
         }
         if let expectedBuild, Int(info["CFBundleVersion"] as? String ?? "") != expectedBuild {
-            throw UpdateError.badBundle("ожидалась сборка \(expectedBuild)")
+            throw UpdateError.badBundle(L.tr("ожидалась сборка \(expectedBuild)", "expected build \(expectedBuild)"))
         }
         try sign(app)
         return app
@@ -243,7 +244,7 @@ enum Installer {
 
     static func sign(_ app: URL) throws {
         guard let script = Bundle.main.url(forResource: "local-sign", withExtension: "sh") else {
-            throw UpdateError.badBundle("нет local-sign.sh")
+            throw UpdateError.badBundle(L.tr("нет local-sign.sh", "no local-sign.sh"))
         }
         let output = try run("/bin/bash", [script.path, app.path])
         log(output.trimmingCharacters(in: .whitespacesAndNewlines))

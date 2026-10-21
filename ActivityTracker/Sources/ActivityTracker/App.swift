@@ -12,6 +12,7 @@ final class AppServices {
     let menuStats: StatsModel
     let windowStats: StatsModel
     let updater: Updater
+    let sampler: SystemSampler
     let databaseURL: URL
     let startupError: String?
 
@@ -20,13 +21,17 @@ final class AppServices {
         calendar.firstWeekday = 2   // weeks start on Monday
         let days = DayCalendar(calendar: calendar)
 
-        func open(_ url: URL) throws -> (ActivityStore, ActivityStore) {
-            (try ActivityStore(path: url.path, days: days), try ActivityStore(path: url.path, days: days))
+        typealias Stores = (recorder: ActivityStore, reader: ActivityStore, systemRecorder: SystemStore,
+                            systemReader: SystemStore)
+        func open(_ url: URL) throws -> Stores {
+            (try ActivityStore(path: url.path, days: days), try ActivityStore(path: url.path, days: days),
+             try SystemStore(path: url.path, days: days), try SystemStore(path: url.path, days: days))
         }
 
-        // Two connections to one file: the tracker writes on the main thread, reports are built in the background.
+        // Several connections to one file: writers (tracker on the main thread, system sampler in the background)
+        // and readers for building reports in the background.
         var url: URL
-        var stores: (recorder: ActivityStore, reader: ActivityStore)
+        var stores: Stores
         var problem: String?
         do {
             url = try ActivityStore.defaultURL()
@@ -34,17 +39,18 @@ final class AppServices {
         } catch {
             url = FileManager.default.temporaryDirectory.appendingPathComponent("ActivityTracker-fallback.sqlite")
             stores = try! open(url)
-            problem = "Основная база недоступна (\(error)). Данные пишутся во временный файл."
+            problem = L.tr("Основная база недоступна (\(error)). Данные пишутся во временный файл.", "The main database is unavailable (\(error)). Data goes to a temporary file.")
         }
         databaseURL = url
         startupError = problem
-        let (recorder, reader) = stores
 
         settings = Settings()
-        tracker = Tracker(store: recorder, settings: settings)
-        menuStats = StatsModel(store: reader)
-        windowStats = StatsModel(store: reader)
+        L.current = L.resolve(settings.language)
+        tracker = Tracker(store: stores.recorder, settings: settings)
+        menuStats = StatsModel(store: stores.reader, systemStore: stores.systemReader)
+        windowStats = StatsModel(store: stores.reader, systemStore: stores.systemReader)
         updater = Updater(settings: settings)
+        sampler = SystemSampler(store: stores.systemRecorder)
     }
 }
 
@@ -99,6 +105,7 @@ struct ActivityTrackerApp: App {
         let services = AppServices.shared
         services.settings.firstRunSetup()
         services.tracker.start()
+        services.sampler.start()
         services.updater.start()
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
@@ -110,6 +117,7 @@ struct ActivityTrackerApp: App {
     var body: some Scene {
         MenuBarExtra(isInserted: menuBarShown) {
             PopoverView(databaseURL: AppServices.shared.databaseURL, startupError: AppServices.shared.startupError)
+                .id(settings.language)   // rebuild every text when the language changes
                 .environmentObject(tracker)
                 .environmentObject(stats)
                 .environmentObject(settings)

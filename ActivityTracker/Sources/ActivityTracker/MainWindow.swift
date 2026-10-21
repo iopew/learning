@@ -11,6 +11,9 @@ final class MainWindowController: NSObject, NSWindowDelegate {
 
     var isVisible: Bool { window?.isVisible == true }
 
+    /// On screen or minimized to the Dock.
+    var isOpen: Bool { window.map { $0.isVisible || $0.isMiniaturized } ?? false }
+
     func show() {
         if window == nil { window = makeWindow() }
         NSApp.setActivationPolicy(.regular)
@@ -94,9 +97,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if NSAppleEventManager.shared().currentAppleEvent?.eventID == AEEventID(kAEQuitApplication) {
             return .terminateNow
         }
+        // A held ⌘Q repeats: the first press closed the window, the repeats must not quit for real.
+        if let event = NSApp.currentEvent, event.type == .keyDown, event.isARepeat {
+            return .terminateCancel
+        }
         // The user quitting from the window (⌘Q on any layout, or the app menu): close the window and keep
         // recording. Only the "Выйти" buttons stop the tracker.
-        if MainWindowController.shared.isVisible {
+        if MainWindowController.shared.isOpen {
             MainWindowController.shared.close()
             return .terminateCancel
         }
@@ -127,6 +134,22 @@ struct MainWindowView: View {
     @EnvironmentObject private var updater: Updater
 
     @State private var showSettings = false
+    @State private var pane: Pane = .activity
+
+    enum Pane: String, CaseIterable, Identifiable {
+        case activity, battery, system, tips
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .activity: return L.tr("Активность", "Activity")
+            case .battery: return L.tr("Батарея", "Battery")
+            case .system: return L.tr("Система", "System")
+            case .tips: return L.tr("Советы", "Tips")
+            }
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -140,7 +163,7 @@ struct MainWindowView: View {
                     Button {
                         showSettings = true
                     } label: {
-                        Label("Настройки", systemImage: "gearshape")
+                        Label(L.tr("Настройки", "Settings"), systemImage: "gearshape")
                     }
                     QuitButton()
                 }
@@ -155,32 +178,38 @@ struct MainWindowView: View {
                     .padding(.horizontal, 24)
                     .padding(.bottom, 8)
             }
+            Picker(L.tr("Раздел", "Section"), selection: $pane) {
+                ForEach(Pane.allCases) { item in
+                    Text(item.title + (item == .tips && !stats.tips.isEmpty ? " (\(stats.tips.count))" : "")).tag(item)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 520)
+            .padding(.bottom, 12)
             Divider()
-            HStack(alignment: .top, spacing: 0) {
+            switch pane {
+            case .activity: activity
+            case .battery: single { if let system = stats.system { BatteryPanel(system: system, chartHeight: 220) } }
+            case .system: single { if let system = stats.system { SystemPanel(system: system, chartHeight: 200) } }
+            case .tips:
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
-                        UpdateBanner()
-                        StatsControls()
-                        if let report = stats.report {
-                            ReportOverview(report: report, style: .wide)
-                        } else {
-                            ReportPlaceholder()
-                        }
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(L.tr("Советы на сегодня", "Tips for today")).font(.title3.weight(.semibold))
+                        TipsPanel(tips: stats.tips)
+                        Text(L.tr("Советы считаются только на этом Mac по твоей же истории: сегодня против обычного дня за последние две недели.",
+                                  "Tips are computed on this Mac from your own history: today against your usual day over the last two weeks."))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
+                    .frame(maxWidth: 720, alignment: .leading)
                     .padding(24)
+                    .frame(maxWidth: .infinity)
                 }
-                .frame(minWidth: 500, maxWidth: .infinity)
-                Divider()
-                ScrollView {
-                    if let report = stats.report {
-                        ReportLists(report: report)
-                            .padding(20)
-                    }
-                }
-                .frame(width: 400)
             }
         }
         .frame(minWidth: 900, minHeight: 600)
+        .id(settings.language)   // rebuild every text when the language changes
         .onAppear { stats.reload() }
         .onReceive(tracker.$todayTotal) { _ in
             if MainWindowController.shared.isVisible { stats.refreshIfLive() }
@@ -191,7 +220,7 @@ struct MainWindowView: View {
                 Divider()
                 HStack {
                     Spacer()
-                    Button("Готово") { showSettings = false }
+                    Button(L.tr("Готово", "Done")) { showSettings = false }
                         .keyboardShortcut(.defaultAction)
                 }
                 .padding(12)
@@ -199,6 +228,46 @@ struct MainWindowView: View {
             .frame(width: 520, height: 640)
             .environmentObject(settings)
             .environmentObject(updater)
+        }
+    }
+
+    /// Statistics: charts on the left, lists on the right.
+    private var activity: some View {
+        HStack(alignment: .top, spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    UpdateBanner()
+                    StatsControls()
+                    if let report = stats.report {
+                        ReportOverview(report: report, style: .wide)
+                    } else {
+                        ReportPlaceholder()
+                    }
+                }
+                .padding(24)
+            }
+            .frame(minWidth: 500, maxWidth: .infinity)
+            Divider()
+            ScrollView {
+                if let report = stats.report {
+                    ReportLists(report: report)
+                        .padding(20)
+                }
+            }
+            .frame(width: 400)
+        }
+    }
+
+    /// One scrolling column with the period controls on top (battery, system).
+    private func single<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                StatsControls()
+                content()
+            }
+            .frame(maxWidth: 860, alignment: .leading)
+            .padding(24)
+            .frame(maxWidth: .infinity)
         }
     }
 }

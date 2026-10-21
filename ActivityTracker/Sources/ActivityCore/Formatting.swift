@@ -13,16 +13,30 @@ public enum URLTools {
 }
 
 public enum Format {
-    /// 18720 → "5ч 12м", 720 → "12м", 42 → "42с".
+    /// 18720 → "5ч 12м" / "5h 12m", 720 → "12м" / "12m", 42 → "42с" / "42s".
     public static func duration(_ seconds: TimeInterval) -> String {
         let total = Int(seconds.rounded())
         let hours = total / 3600
         let minutes = (total % 3600) / 60
+        let (h, m, s) = L.current == .en ? ("h", "m", "s") : ("ч", "м", "с")
         if hours > 0 {
-            return minutes > 0 ? "\(hours)ч \(minutes)м" : "\(hours)ч"
+            return minutes > 0 ? "\(hours)\(h) \(minutes)\(m)" : "\(hours)\(h)"
         }
-        if minutes > 0 { return "\(minutes)м" }
-        return "\(total)с"
+        if minutes > 0 { return "\(minutes)\(m)" }
+        return "\(total)\(s)"
+    }
+
+    /// 15_300_000_000 → "15,3 ГБ" / "15.3 GB".
+    public static func bytes(_ count: Double) -> String {
+        let units = L.current == .en ? ["B", "KB", "MB", "GB", "TB"] : ["Б", "КБ", "МБ", "ГБ", "ТБ"]
+        var value = max(count, 0)
+        var unit = 0
+        while value >= 1000 && unit < units.count - 1 {
+            value /= 1000
+            unit += 1
+        }
+        let number = value >= 100 || unit == 0 ? String(format: "%.0f", value) : String(format: "%.1f", value)
+        return (L.current == .en ? number : number.replacingOccurrences(of: ".", with: ",")) + " " + units[unit]
     }
 
     /// 0.4321 → "43%"; tiny non-zero shares show as "<1%".

@@ -18,6 +18,7 @@ final class ActivityStoreTests: XCTestCase {
     private let notes = Sample(bundleID: "com.apple.Notes", appName: "Notes")
 
     override func setUpWithError() throws {
+        L.current = .ru
         path = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).sqlite").path
         store = try ActivityStore(path: path, days: days)
     }
@@ -256,6 +257,20 @@ final class ActivityStoreTests: XCTestCase {
         XCTAssertEqual(other, 540)   // app.5 (300 s) + app.6 (240 s)
     }
 
+    func testBaselineAveragesActiveDaysBeforeToday() throws {
+        try use(xcode, from: date("2026-10-18 10:00:00"), seconds: 3600)
+        try use(safari, from: date("2026-10-20 10:00:00"), seconds: 1800)
+        try use(xcode, from: date("2026-10-20 12:00:00"), seconds: 1800)
+        try use(xcode, from: date("2026-10-22 10:00:00"), seconds: 7200)   // today: not part of the baseline
+
+        let baseline = try store.baseline(days: 14, before: date("2026-10-22 18:00:00"))
+        XCTAssertEqual(baseline.activeDays, 2)
+        XCTAssertEqual(baseline.totalPerDay, 3600)
+        XCTAssertEqual(baseline.appsPerDay["com.apple.dt.Xcode"], 2700)
+        XCTAssertEqual(baseline.domainsPerDay["youtube.com"], 900)
+        XCTAssertEqual(try store.baseline(before: date("2026-10-01 12:00:00")), UsageBaseline())
+    }
+
     // MARK: - Deleting
 
     func testEraseDomainRemovesOnlyThatSite() throws {
@@ -309,7 +324,17 @@ final class ActivityStoreTests: XCTestCase {
         XCTAssertEqual(URLTools.domain(from: ""), "")
     }
 
+    func testEnglishFormatting() {
+        L.current = .en
+        defer { L.current = .ru }
+        XCTAssertEqual(Format.duration(18720), "5h 12m")
+        XCTAssertEqual(Format.bytes(15_300_000_000), "15.3 GB")
+        XCTAssertEqual(StatsRange.year.title, "Year")
+    }
+
     func testFormatting() {
+        XCTAssertEqual(Format.bytes(15_300_000_000), "15,3 ГБ")
+        XCTAssertEqual(Format.bytes(512), "512 Б")
         XCTAssertEqual(Format.duration(18720), "5ч 12м")
         XCTAssertEqual(Format.duration(7200), "2ч")
         XCTAssertEqual(Format.duration(720), "12м")

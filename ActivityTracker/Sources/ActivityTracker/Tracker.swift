@@ -63,7 +63,7 @@ final class Tracker: ObservableObject {
             try store.erase(what)
             lastError = nil
         } catch {
-            lastError = "Не удалось удалить: \(error)"
+            lastError = L.tr("Не удалось удалить: \(error)", "Could not delete: \(error)")
         }
         refreshToday(Date())
         NotificationCenter.default.post(name: .activityDataChanged, object: nil)
@@ -118,7 +118,7 @@ final class Tracker: ObservableObject {
             try store.record(sample, at: now, interval: Self.interval)
             lastError = nil
         } catch {
-            lastError = "Не удалось записать: \(error)"
+            lastError = L.tr("Не удалось записать: \(error)", "Could not record: \(error)")
         }
         current = sample
         state = .active
@@ -128,7 +128,7 @@ final class Tracker: ObservableObject {
         do {
             try store.endStreak(at: time)
         } catch {
-            lastError = "Не удалось записать: \(error)"
+            lastError = L.tr("Не удалось записать: \(error)", "Could not record: \(error)")
         }
         current = nil
         state = newState

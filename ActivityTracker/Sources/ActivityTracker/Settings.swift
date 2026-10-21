@@ -1,4 +1,5 @@
 import AppKit
+import ActivityCore
 import ServiceManagement
 
 /// User preferences, persisted in UserDefaults.
@@ -10,10 +11,18 @@ final class Settings: ObservableObject {
 
         var title: String {
             switch self {
-            case .system: return "Как в системе"
-            case .light: return "Светлая"
-            case .dark: return "Тёмная"
+            case .system: return L.tr("Как в системе", "System")
+            case .light: return L.tr("Светлая", "Light")
+            case .dark: return L.tr("Тёмная", "Dark")
             }
+        }
+    }
+
+    static func title(of language: AppLanguage) -> String {
+        switch language {
+        case .system: return L.tr("Как в системе", "System")
+        case .ru: return "Русский"
+        case .en: return "English"
         }
     }
 
@@ -24,9 +33,9 @@ final class Settings: ObservableObject {
 
         var title: String {
             switch self {
-            case .icon: return "Значок"
-            case .time: return "Время"
-            case .hidden: return "Скрыть"
+            case .icon: return L.tr("Значок", "Icon")
+            case .time: return L.tr("Время", "Time")
+            case .hidden: return L.tr("Скрыть", "Hide")
             }
         }
     }
@@ -52,6 +61,13 @@ final class Settings: ObservableObject {
             MainWindowController.shared.applyDockPolicy()
         }
     }
+    @Published var language: AppLanguage {
+        didSet {
+            defaults.set(language.rawValue, forKey: Keys.language)
+            L.current = L.resolve(language)
+            NotificationCenter.default.post(name: .languageChanged, object: nil)
+        }
+    }
     /// What the menu bar item shows. Hidden: the app runs silently, statistics open from Launchpad / Dock.
     @Published var menuBarStyle: MenuBarStyle { didSet { defaults.set(menuBarStyle.rawValue, forKey: Keys.menuBarStyle) } }
     /// Ask GitHub Releases for newer builds (the app's only network access).
@@ -67,6 +83,7 @@ final class Settings: ObservableObject {
         static let recordURLs = "recordURLs"
         static let appearance = "appearance"
         static let alwaysShowInDock = "alwaysShowInDock"
+        static let language = "language"
         static let menuBarStyle = "menuBarStyle"
         static let checkForUpdates = "checkForUpdates"
         static let autoUpdate = "autoUpdate"
@@ -84,6 +101,7 @@ final class Settings: ObservableObject {
             Keys.recordURLs: true,
             Keys.appearance: Appearance.system.rawValue,
             Keys.alwaysShowInDock: false,
+            Keys.language: AppLanguage.system.rawValue,
             Keys.menuBarStyle: MenuBarStyle.icon.rawValue,
             Keys.checkForUpdates: true,
             Keys.autoUpdate: true,
@@ -95,6 +113,7 @@ final class Settings: ObservableObject {
         recordURLs = defaults.bool(forKey: Keys.recordURLs)
         appearance = Appearance(rawValue: defaults.string(forKey: Keys.appearance) ?? "") ?? .system
         alwaysShowInDock = defaults.bool(forKey: Keys.alwaysShowInDock)
+        language = AppLanguage(rawValue: defaults.string(forKey: Keys.language) ?? "") ?? .system
         menuBarStyle = MenuBarStyle(rawValue: defaults.string(forKey: Keys.menuBarStyle) ?? "") ?? .icon
         checkForUpdates = defaults.bool(forKey: Keys.checkForUpdates)
         autoUpdate = defaults.bool(forKey: Keys.autoUpdate)
