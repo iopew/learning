@@ -21,7 +21,7 @@ struct HourlyChart: View {
         .chartXAxis {
             AxisMarks(values: stride(from: 0, to: 24, by: 3).map { Self.hours[$0] })
         }
-        .chartYScale(domain: 0...60)
+        .chartYScale(domain: 0.0...60.0)
         .chartYAxis {
             AxisMarks(values: [0.0, 15.0, 30.0, 45.0, 60.0]) { value in
                 AxisGridLine()

@@ -173,7 +173,7 @@ final class ActivityStoreTests: XCTestCase {
         let report = try store.report(range: .year, anchor: date("2026-10-22 12:00:00"))
 
         XCTAssertEqual(report.bucketUnit, .week)
-        XCTAssertEqual(report.buckets.reduce(0) { $0 + $1.seconds }, 900)
+        XCTAssertEqual(report.buckets.reduce(0.0) { $0 + $1.seconds }, 900)
         XCTAssertEqual(report.buckets.last?.start, date("2026-10-19 00:00:00"))   // Monday
         XCTAssertEqual(report.buckets.last?.seconds, 900)
         XCTAssertTrue(report.buckets.count >= 52 && report.buckets.count <= 54)
@@ -213,10 +213,10 @@ final class ActivityStoreTests: XCTestCase {
         XCTAssertNil(report.minutes[tenOClock + 3])
         XCTAssertEqual(report.minutes[11 * 60 + 31]?.appName, "Xcode")
 
-        let hourly = Dictionary(grouping: report.hourly, by: \.hour).mapValues { $0.reduce(0) { $0 + $1.seconds } }
+        let hourly = Dictionary(grouping: report.hourly, by: \.hour).mapValues { $0.reduce(0.0) { $0 + $1.seconds } }
         XCTAssertEqual(hourly[10], 150)
         XCTAssertEqual(hourly[11], 120)
-        XCTAssertEqual(report.hourly.reduce(0) { $0 + $1.seconds }, report.total)
+        XCTAssertEqual(report.hourly.reduce(0.0) { $0 + $1.seconds }, report.total)
 
         XCTAssertEqual(report.sessions.map(\.appName), ["Xcode", "Safari", "Xcode"])
         XCTAssertEqual(report.sessions[0].duration, 90)
@@ -251,8 +251,9 @@ final class ActivityStoreTests: XCTestCase {
         let bundles = Set(report.hourly.map(\.bundleID))
 
         XCTAssertEqual(bundles, ["app.0", "app.1", "app.2", "app.3", "app.4", ActivityStore.otherBundleID])
-        let other = report.hourly.filter { $0.bundleID == ActivityStore.otherBundleID }.reduce(0) { $0 + $1.seconds }
-        XCTAssertEqual(other, Double(600 - 5 * 60 + 600 - 6 * 60))
+        let otherSlices = report.hourly.filter { $0.bundleID == ActivityStore.otherBundleID }
+        let other = otherSlices.reduce(0.0) { $0 + $1.seconds }
+        XCTAssertEqual(other, 540)   // app.5 (300 s) + app.6 (240 s)
     }
 
     // MARK: - Helpers

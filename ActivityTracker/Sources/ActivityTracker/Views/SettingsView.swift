@@ -81,9 +81,9 @@ struct SettingsView: View {
         accessibilityGranted = WindowTitle.isTrusted
         deniedBrowsers = BrowserURL.lastErrors
             .filter { $0.value == BrowserURL.notPermittedError }
-            .map { bundleID, _ in
-                NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)?
-                    .deletingPathExtension().lastPathComponent ?? bundleID
+            .map { entry in
+                NSWorkspace.shared.urlForApplication(withBundleIdentifier: entry.key)?
+                    .deletingPathExtension().lastPathComponent ?? entry.key
             }
             .sorted()
     }
