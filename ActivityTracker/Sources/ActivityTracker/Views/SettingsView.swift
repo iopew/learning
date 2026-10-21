@@ -85,6 +85,21 @@ struct SettingsView: View {
 
                 Divider()
 
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Данные").font(.headline)
+                    HStack {
+                        ForgetMenu()
+                        Spacer()
+                        Button("Удалить всю историю…", role: .destructive) { DataEraser.confirmAndErase(.all) }
+                    }
+                    Text("Сайт или приложение целиком удаляются из списков: наведи на строку и нажми корзину.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Divider()
+
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Диагностика").font(.headline)
                     Button(diagnosticsStatus ?? "Скопировать сведения об окне (через 5 секунд)") {

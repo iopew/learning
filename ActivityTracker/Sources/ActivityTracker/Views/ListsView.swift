@@ -7,23 +7,35 @@ struct AppsList: View {
     let colors: AppColors
 
     @State private var expanded: Set<String> = []
+    @State private var hovered: String?
 
     var body: some View {
         LazyVStack(alignment: .leading, spacing: 8) {
             if report.apps.isEmpty { EmptyNote() }
             ForEach(report.apps.prefix(50)) { app in
                 VStack(alignment: .leading, spacing: 4) {
-                    UsageRow(color: colors.color(app.bundleID), name: app.appName, seconds: app.seconds,
-                             total: report.total,
-                             expanded: app.topTitles.isEmpty ? nil : expanded.contains(app.bundleID))
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            if expanded.contains(app.bundleID) {
-                                expanded.remove(app.bundleID)
-                            } else {
-                                expanded.insert(app.bundleID)
+                    HStack(alignment: .top, spacing: 6) {
+                        UsageRow(color: colors.color(app.bundleID), name: app.appName, seconds: app.seconds,
+                                 total: report.total,
+                                 expanded: app.topTitles.isEmpty ? nil : expanded.contains(app.bundleID))
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                if expanded.contains(app.bundleID) {
+                                    expanded.remove(app.bundleID)
+                                } else {
+                                    expanded.insert(app.bundleID)
+                                }
                             }
+                        RowEraseButton(what: .app(app.bundleID), isVisible: hovered == app.bundleID)
+                    }
+                    .onHover { inside in
+                        if inside { hovered = app.bundleID } else if hovered == app.bundleID { hovered = nil }
+                    }
+                    .contextMenu {
+                        Button("Удалить все данные о «\(app.appName)»…") {
+                            DataEraser.confirmAndErase(.app(app.bundleID))
                         }
+                    }
                     if expanded.contains(app.bundleID) {
                         ForEach(app.topTitles) { title in
                             HStack {
@@ -45,6 +57,8 @@ struct AppsList: View {
 struct SitesList: View {
     let report: Report
 
+    @State private var hovered: String?
+
     var body: some View {
         LazyVStack(alignment: .leading, spacing: 8) {
             if report.domains.isEmpty {
@@ -52,7 +66,24 @@ struct SitesList: View {
             }
             let browsing = report.domains.reduce(0) { $0 + $1.seconds }
             ForEach(report.domains) { site in
-                UsageRow(color: .accentColor, name: site.domain, seconds: site.seconds, total: browsing)
+                HStack(alignment: .top, spacing: 6) {
+                    UsageRow(color: .accentColor, name: site.domain, seconds: site.seconds, total: browsing)
+                    RowEraseButton(what: .domain(site.domain), isVisible: hovered == site.domain)
+                }
+                .contentShape(Rectangle())
+                .onHover { inside in
+                    if inside { hovered = site.domain } else if hovered == site.domain { hovered = nil }
+                }
+                .contextMenu {
+                    Button("Удалить все данные о \(site.domain)…") {
+                        DataEraser.confirmAndErase(.domain(site.domain))
+                    }
+                }
+            }
+            if !report.domains.isEmpty {
+                Text("Наведи на сайт и нажми корзину (или правый клик), чтобы удалить всё о нём.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }

@@ -16,6 +16,12 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         NSApp.setActivationPolicy(.regular)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        // Right after an .accessory → .regular switch the menu bar can keep the previous app's menus;
+        // activating once more on the next run loop pass fixes it.
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
+            self.window?.makeKeyAndOrderFront(nil)
+        }
     }
 
     func close() {
@@ -58,6 +64,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private static var allowQuit = false
+    /// The app was started by hand (not at login, not by the updater in the background).
+    static var launchedByUser = false
 
     /// Quit and stop recording (the "Выйти" buttons). ⌘Q in the main window only closes the window.
     static func quitForReal() {
@@ -66,10 +74,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Decided here, while the launch Apple Event is current; used by the adoption hand-over too.
+        Self.launchedByUser = shouldOpenWindowAtLaunch()
         guard !Installer.isHandingOver else { return }
         AppServices.shared.settings.applyAppearance()
         MainWindowController.shared.applyDockPolicy()
-        if shouldOpenWindowAtLaunch() { MainWindowController.shared.show() }
+        if Self.launchedByUser { MainWindowController.shared.show() }
     }
 
     /// Double-click in Finder / Launchpad / Dock while already running.
@@ -80,19 +90,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if Self.allowQuit { return .terminateNow }
-        // ⌘Q while the window is in front (the quit request comes from a ⌘-key press, whatever the layout):
-        // close the window, keep recording.
-        if MainWindowController.shared.isVisible, let event = NSApp.currentEvent, event.type == .keyDown,
-           event.modifierFlags.contains(.command) {
+        // Logout, shutdown and the update installer ask to quit with an Apple Event: always obey.
+        if NSAppleEventManager.shared().currentAppleEvent?.eventID == AEEventID(kAEQuitApplication) {
+            return .terminateNow
+        }
+        // The user quitting from the window (⌘Q on any layout, or the app menu): close the window and keep
+        // recording. Only the "Выйти" buttons stop the tracker.
+        if MainWindowController.shared.isVisible {
             MainWindowController.shared.close()
             return .terminateCancel
         }
-        // Logout, shutdown, the updater, the "Quit" menu item.
         return .terminateNow
     }
 
     /// Manual launches open the window; launches at login and restarts after an update stay in the menu bar.
     private func shouldOpenWindowAtLaunch() -> Bool {
+        if CommandLine.arguments.contains("--show-window") { return true }
         if CommandLine.arguments.contains("--background") { return false }
         if let event = NSAppleEventManager.shared().currentAppleEvent,
            event.eventID == AEEventID(kAEOpenApplication),
@@ -123,6 +136,7 @@ struct MainWindowView: View {
                 Spacer()
                 HStack(spacing: 10) {
                     PauseButton()
+                    ForgetMenu()
                     Button {
                         showSettings = true
                     } label: {

@@ -256,6 +256,49 @@ final class ActivityStoreTests: XCTestCase {
         XCTAssertEqual(other, 540)   // app.5 (300 s) + app.6 (240 s)
     }
 
+    // MARK: - Deleting
+
+    func testEraseDomainRemovesOnlyThatSite() throws {
+        let start = date("2026-10-22 10:00:00")
+        try use(xcode, from: start, seconds: 60)
+        try use(safari, from: start.addingTimeInterval(60), seconds: 60)
+
+        XCTAssertEqual(try store.erase(.domain("youtube.com")), 1)
+        let events = try store.events(on: start)
+        XCTAssertEqual(events.map(\.appName), ["Xcode"])
+        XCTAssertEqual(try store.report(range: .day, anchor: start).domains, [])
+    }
+
+    func testEraseApp() throws {
+        let start = date("2026-10-22 10:00:00")
+        try use(xcode, from: start, seconds: 60)
+        try use(notes, from: start.addingTimeInterval(60), seconds: 60)
+        try store.erase(.app("com.apple.dt.Xcode"))
+        XCTAssertEqual(try store.events(on: start).map(\.appName), ["Notes"])
+    }
+
+    func testForgetLastMinutesCutsTheRunningEvent() throws {
+        let start = date("2026-10-22 10:00:00")
+        try use(xcode, from: start, seconds: 600)                        // 10:00–10:10
+        try use(safari, from: start.addingTimeInterval(600), seconds: 300)   // 10:10–10:15
+
+        try store.erase(.since(date("2026-10-22 10:05:00")))
+        let events = try store.events(on: start)
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events[0].end, date("2026-10-22 10:05:00"))
+        XCTAssertEqual(try store.total(on: start), 300)
+    }
+
+    func testRecordingContinuesAfterErase() throws {
+        let start = date("2026-10-22 10:00:00")
+        try use(xcode, from: start, seconds: 30)
+        try store.erase(.all)
+        XCTAssertEqual(try store.total(on: start), 0)
+        // The open event was deleted: the next heartbeat must start a fresh one, not extend a ghost.
+        try store.record(xcode, at: start.addingTimeInterval(30), interval: 5)
+        XCTAssertEqual(try store.total(on: start), 5)
+    }
+
     // MARK: - Helpers
 
     func testDomainExtraction() {

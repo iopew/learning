@@ -15,20 +15,26 @@ final class StatsModel: ObservableObject {
     private let queue = DispatchQueue(label: "ActivityTracker.stats", qos: .userInitiated)
     private var generation = 0
     private var lastLoad = Date.distantPast
+    /// True while the user looks at "today" (not a past period): the anchor then moves on at midnight.
+    private var followsToday = true
 
     init(store: ActivityStore) {
         self.store = store
         self.days = store.days
+        NotificationCenter.default.addObserver(forName: .activityDataChanged, object: nil, queue: .main) { [weak self] _ in
+            self?.reload()
+        }
     }
 
     /// Called on every tracker tick while a stats view is visible. Periods that include today change as you work:
     /// the day view refreshes every tick, longer (heavier) periods at most once a minute.
     func refreshIfLive() {
-        guard isAtToday else { return }
-        if range == .day || Date().timeIntervalSince(lastLoad) >= 60 { reload() }
+        guard followsToday else { return }
+        if range == .day || Date().timeIntervalSince(lastLoad) >= 60 || !isAtToday { reload() }
     }
 
     func reload() {
+        if followsToday { anchor = Date() }   // after midnight "today" is a new day
         lastLoad = Date()
         generation += 1
         let request = (generation: generation, range: range, anchor: anchor)
@@ -56,11 +62,12 @@ final class StatsModel: ObservableObject {
     func step(_ direction: Int) {
         guard let length = range.days else { return }
         anchor = min(days.addingDays(direction * length, to: anchor), Date())
+        followsToday = isAtToday
         reload()
     }
 
     func goToToday() {
-        anchor = Date()
+        followsToday = true
         reload()
     }
 

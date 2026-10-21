@@ -57,6 +57,18 @@ final class Tracker: ObservableObject {
         activityToken = nil
     }
 
+    /// Deletes recorded data for good and tells every open statistics view to reload.
+    func erase(_ what: ActivityStore.Erase) {
+        do {
+            try store.erase(what)
+            lastError = nil
+        } catch {
+            lastError = "Не удалось удалить: \(error)"
+        }
+        refreshToday(Date())
+        NotificationCenter.default.post(name: .activityDataChanged, object: nil)
+    }
+
     func setPaused(_ paused: Bool) {
         settings.isPaused = paused
         tick()
@@ -90,9 +102,14 @@ final class Tracker: ObservableObject {
         if isBrowser {
             let url = BrowserURL.currentURL(bundleID: bundleID)
             // Private windows leave no trace at all: not the time, not the site, not the title.
-            if url == BrowserURL.privateMarker || BrowserURL.isPrivateWindowTitle(title, bundleID: bundleID) {
+            // Three independent signals: the browser's AppleScript, Firefox's title, the incognito badge in the UI.
+            let badge = PrivateWindowDetector.verdict(for: app.processIdentifier)
+            if url == BrowserURL.privateMarker || BrowserURL.isPrivateWindowTitle(title, bundleID: bundleID)
+                || badge == .privateWindow {
                 return pause(.privateWindow, at: now)
             }
+            // A window seen for the first time is being checked in the background: skip this one tick.
+            if badge == .unknown { return }
             if settings.recordURLs { sample.url = String(url.prefix(2000)) }
         }
         if settings.recordTitles { sample.title = title }
@@ -145,4 +162,9 @@ final class Tracker: ObservableObject {
         // Record app switches immediately instead of waiting for the next tick.
         on(workspace, NSWorkspace.didActivateApplicationNotification) { _ in }
     }
+}
+
+extension Notification.Name {
+    /// Recorded data was deleted: reports must be rebuilt.
+    static let activityDataChanged = Notification.Name("ActivityTrackerDataChanged")
 }

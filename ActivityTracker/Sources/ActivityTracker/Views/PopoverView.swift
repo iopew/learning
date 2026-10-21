@@ -64,6 +64,7 @@ struct PopoverView: View {
     private var footer: some View {
         HStack(spacing: 14) {
             PauseButton()
+            ForgetMenu()
             Spacer()
             Button {
                 MainWindowController.shared.show()

@@ -98,7 +98,9 @@ final class Updater: ObservableObject {
         case .success(let update?):
             phase = .available(update)
             let failedBefore = Installer.lastFailedBuild == update.build
-            if settings.autoUpdate && canInstall && !failedBefore && !userInitiated {
+            // Never pull the window away from under the user: while it's open the banner's button does it.
+            let windowOpen = MainWindowController.shared.isVisible
+            if settings.autoUpdate && canInstall && !failedBefore && !userInitiated && !windowOpen {
                 install(update)
             }
         }
@@ -112,6 +114,7 @@ final class Updater: ObservableObject {
         }
         phase = .downloading(update.build)
         Installer.log("downloading build \(update.build) from \(update.downloadURL)")
+        let reopenWindow = MainWindowController.shared.isVisible
 
         session.downloadTask(with: update.downloadURL) { location, response, error in
             do {
@@ -126,7 +129,7 @@ final class Updater: ObservableObject {
 
                 DispatchQueue.main.async { self.phase = .installing(update.build) }
                 let staged = try Installer.stage(zip: zip, expectedBuild: update.build)
-                try Installer.launchInstaller(staged: staged, target: Bundle.main.bundleURL)
+                try Installer.launchInstaller(staged: staged, target: Bundle.main.bundleURL, showWindow: reopenWindow)
                 // The installer quits this app in a moment. If it doesn't, say so instead of spinning forever.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 90) {
                     if self.phase == .installing(update.build) {
@@ -219,7 +222,10 @@ enum Installer {
         try? FileManager.default.removeItem(at: folder)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try run("/usr/bin/ditto", ["-x", "-k", zip.path, folder.path])
-        try? FileManager.default.removeItem(at: zip)
+        // Our own downloads are not needed any more; a zip handed in from elsewhere (--update-from-zip) is left alone.
+        if zip.deletingLastPathComponent().standardizedFileURL == (try? updatesDirectory())?.standardizedFileURL {
+            try? FileManager.default.removeItem(at: zip)
+        }
 
         let app = folder.appendingPathComponent("ActivityTracker.app")
         guard let info = NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist")) else {
@@ -249,9 +255,10 @@ enum Installer {
     }
 
     /// Starts `staged` as a separate app instance in installer mode. Returns once the launch was requested.
-    static func launchInstaller(staged: URL, target: URL) throws {
+    /// `showWindow`: open the main window once the new version is up (the user was looking at it).
+    static func launchInstaller(staged: URL, target: URL, showWindow: Bool = false) throws {
         log("starting installer \(staged.path) for \(target.path)")
-        try open(staged, arguments: ["--install-update", target.path])
+        try open(staged, arguments: ["--install-update", target.path] + (showWindow ? ["--show-window"] : []))
     }
 
     /// `open -n -g`: a new instance, in the background, as its own launchd job (so it outlives this process).
@@ -272,7 +279,7 @@ enum Installer {
 
     /// A copy installed by hand (downloaded build, ad-hoc signed) is re-signed with the stable local identity once,
     /// before the user grants permissions, so later updates keep them. Returns true when a hand-over started.
-    static func adoptIfNeeded() -> Bool {
+    static func adoptIfNeeded(showWindow: Bool) -> Bool {
         let app = Bundle.main.bundleURL
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
         guard canReplace(app), app.path.contains("/Applications/"),
@@ -287,7 +294,7 @@ enum Installer {
             let copy = folder.appendingPathComponent("ActivityTracker.app")
             try run("/usr/bin/ditto", [app.path, copy.path])
             try sign(copy)
-            try launchInstaller(staged: copy, target: app)
+            try launchInstaller(staged: copy, target: app, showWindow: showWindow)
             log("adoption: handing over to the locally signed copy")
             return true
         } catch {
@@ -359,7 +366,8 @@ enum Installer {
         }
 
         // 3. Start the new version and make sure it stays up.
-        try? open(target, arguments: ["--background"])
+        let launchMode = CommandLine.arguments.contains("--show-window") ? "--show-window" : "--background"
+        try? open(target, arguments: [launchMode])
         let started = wait(20, until: { isRunning(at: target) })
         let stable = started && { _ = wait(5, until: { false }); return isRunning(at: target) }()
         guard stable else {

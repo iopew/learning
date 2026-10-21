@@ -13,6 +13,10 @@ on:
 permissions:
   contents: write   # publishing releases (the app updates itself from them)
 
+concurrency:
+  group: activity-tracker-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: macos-15
@@ -99,14 +103,16 @@ jobs:
           before="$(codesign -d -r- "$APPS" 2>/dev/null)"
 
           # Update to this build through the same path the updater uses.
-          "$APPS/Contents/MacOS/ActivityTracker" --update-from-zip "$PWD/.build/ActivityTracker.zip"
+          cp .build/ActivityTracker.zip /tmp/update-test.zip
+          "$APPS/Contents/MacOS/ActivityTracker" --update-from-zip /tmp/update-test.zip
+          test -f .build/ActivityTracker.zip   # the release asset must survive the test
           for i in $(seq 1 90); do
-            if [ "$(version)" = "$BUILD_NUMBER" ] && pgrep -x ActivityTracker; then break; fi
+            if [ "$(version)" = "$BUILD_NUMBER" ] && pgrep -f "^$APPS/Contents/MacOS/ActivityTracker"; then break; fi
             sleep 1
           done
           sleep 10
           test "$(version)" = "$BUILD_NUMBER"
-          pgrep -x ActivityTracker
+          pgrep -f "^$APPS/Contents/MacOS/ActivityTracker"
           ps -o pid,command -p "$(pgrep -x ActivityTracker | tr '\n' ',' | sed 's/,$//')"
           after="$(codesign -d -r- "$APPS" 2>/dev/null)"
           test "$before" = "$after"   # same identity → macOS keeps the permissions

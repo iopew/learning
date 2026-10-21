@@ -30,6 +30,7 @@ public final class ActivityStore {
         try db.execute("""
             PRAGMA journal_mode=WAL;
             PRAGMA synchronous=NORMAL;
+            PRAGMA secure_delete=ON;
             CREATE TABLE IF NOT EXISTS events(
                 id INTEGER PRIMARY KEY,
                 day TEXT NOT NULL,
@@ -101,6 +102,49 @@ public final class ActivityStore {
     private func updateEnd(of event: OpenEvent) throws {
         try db.run("UPDATE events SET end_at = ? WHERE id = ?",
                    [.double(event.end.timeIntervalSince1970), .int(event.id)])
+    }
+
+    // MARK: - Deleting
+
+    public enum Erase: Equatable {
+        /// Everything recorded on this site.
+        case domain(String)
+        /// Everything recorded in this app (by bundle ID).
+        case app(String)
+        /// Everything after this moment ("forget the last 15 minutes"); an event running across it is cut there.
+        case since(Date)
+        /// The whole history.
+        case all
+    }
+
+    /// Deletes for good: rows are removed, freed pages are zeroed (secure_delete) and the WAL is checkpointed,
+    /// so no copy of the deleted titles or URLs stays in the database files. Returns the number of affected events.
+    @discardableResult
+    public func erase(_ what: Erase) throws -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+
+        open = nil   // the open event may be gone; the next sample starts a new one
+        var affected = 0
+        switch what {
+        case .domain(let domain):
+            try db.run("DELETE FROM events WHERE domain = ?", [.text(domain)])
+            affected = db.changes
+        case .app(let bundleID):
+            try db.run("DELETE FROM events WHERE bundle_id = ?", [.text(bundleID)])
+            affected = db.changes
+        case .since(let moment):
+            let time = SQLValue.double(moment.timeIntervalSince1970)
+            try db.run("DELETE FROM events WHERE start_at >= ?", [time])
+            affected = db.changes
+            try db.run("UPDATE events SET end_at = ? WHERE end_at > ? AND start_at < ?", [time, time, time])
+            affected += db.changes
+        case .all:
+            try db.run("DELETE FROM events")
+            affected = db.changes
+        }
+        try db.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+        return affected
     }
 
     // MARK: - Queries

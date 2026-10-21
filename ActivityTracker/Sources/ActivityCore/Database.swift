@@ -33,6 +33,9 @@ final class Database {
 
     var lastInsertRowID: Int64 { sqlite3_last_insert_rowid(handle) }
 
+    /// Rows changed by the last INSERT / UPDATE / DELETE.
+    var changes: Int { Int(sqlite3_changes(handle)) }
+
     func execute(_ sql: String) throws {
         var error: UnsafeMutablePointer<CChar>?
         guard sqlite3_exec(handle, sql, nil, nil, &error) == SQLITE_OK else {

@@ -76,7 +76,9 @@ struct ActivityTrackerApp: App {
         }
 
         // A hand-installed (ad-hoc signed) copy re-signs itself once with the stable local identity and restarts.
-        if Installer.adoptIfNeeded() {
+        // A manual launch (not at login, not a background restart) should end with the window open.
+        let manualLaunch = !arguments.contains("--background") && ProcessInfo.processInfo.systemUptime > 300
+        if Installer.adoptIfNeeded(showWindow: manualLaunch) {
             Installer.isHandingOver = true
             // Normally the installer quits this process within seconds. If it never does, carry on as usual
             // rather than sit there not recording.
