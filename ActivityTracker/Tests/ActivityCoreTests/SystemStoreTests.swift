@@ -118,6 +118,25 @@ final class SystemStoreTests: XCTestCase {
         XCTAssertNil(report.latest)
     }
 
+    func testEnergyIsAggregatedPerHourAndErasable() throws {
+        let chrome = AppEnergy(bundleID: "com.google.Chrome", appName: "Chrome", joules: 2, cpuSeconds: 1)
+        try run(from: date("2026-10-22 09:00:00"), minutes: 90, percent: 80, step: -0.1, onAC: false, energy: [chrome])
+        var report = try store.report(range: .day, anchor: date("2026-10-22 20:00:00"))
+        XCTAssertEqual(report.energyOnBattery.first?.joules ?? 0, 180, accuracy: 0.001)
+        XCTAssertEqual(report.energyOnBattery.first?.cpuSeconds ?? 0, 90, accuracy: 0.001)
+
+        try store.erase(.app("com.google.Chrome"))
+        report = try store.report(range: .day, anchor: date("2026-10-22 20:00:00"))
+        XCTAssertTrue(report.energyAll.isEmpty)
+        XCTAssertTrue(report.hasData)
+
+        try store.erase(.since(date("2026-10-22 10:00:00")))
+        report = try store.report(range: .day, anchor: date("2026-10-22 20:00:00"))
+        XCTAssertEqual(report.batteryPoints.count, 60)
+        try store.erase(.all)
+        XCTAssertFalse(try store.report(range: .day, anchor: date("2026-10-22 20:00:00")).hasData)
+    }
+
     func testPlugStateSurvivesReopen() throws {
         try run(from: date("2026-10-22 09:00:00"), minutes: 5, percent: 50, step: -0.1, onAC: false)
         store = try SystemStore(path: path, days: days)

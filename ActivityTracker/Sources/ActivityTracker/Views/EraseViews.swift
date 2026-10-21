@@ -15,6 +15,7 @@ enum DataEraser {
         NSApp.activate(ignoringOtherApps: true)
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         AppServices.shared.tracker.erase(what)
+        AppServices.shared.sampler.erase(what)
     }
 
     private static func question(for what: ActivityStore.Erase) -> String {

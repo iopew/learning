@@ -52,6 +52,8 @@ final class RecommendationsTests: XCTestCase {
 
         for minute in (11 * 60)..<(11 * 60 + 10) { minutes[minute] = nil }      // a real 10-minute break
         XCTAssertEqual(Recommendations.currentStreak(minutes: minutes, endingAt: 12 * 60 - 1), 50 * 60)
+        // Right now on a break (12:00–12:04 empty): no streak.
+        XCTAssertEqual(Recommendations.currentStreak(minutes: minutes, endingAt: 12 * 60 + 4), 0)
     }
 
     func testLateNight() {

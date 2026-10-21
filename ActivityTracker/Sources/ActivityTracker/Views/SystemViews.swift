@@ -11,7 +11,10 @@ struct BatteryPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if !system.hasBattery {
+            if !system.hasData {
+                EmptyNote(text: L.tr("Пока нет данных — они появляются раз в минуту.",
+                                     "No data yet — it is collected once a minute."))
+            } else if !system.hasBattery {
                 EmptyNote(text: L.tr("У этого Mac нет батареи.", "This Mac has no battery."))
             } else {
                 if let latest = system.latest {
@@ -83,17 +86,27 @@ struct EnergyList: View {
 
     var body: some View {
         let total = usage.reduce(0) { $0 + $1.joules }
+        // Intel Macs have no per-process energy counter: rank by CPU time there.
+        let byCPU = total <= 0
+        let totalCPU = usage.reduce(0) { $0 + $1.cpuSeconds }
+        let rows = byCPU ? usage.sorted { $0.cpuSeconds > $1.cpuSeconds } : usage
         LazyVStack(alignment: .leading, spacing: 8) {
             if usage.isEmpty {
                 EmptyNote(text: L.tr("Пока нет данных — они появляются раз в минуту.",
                                      "No data yet — it is collected once a minute."))
+            } else if byCPU {
+                Text(L.tr("Этот Mac не сообщает энергию по процессам — показано процессорное время.",
+                          "This Mac doesn't report per-process energy — CPU time is shown instead."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            ForEach(usage.prefix(20)) { app in
-                UsageRow(color: .orange, name: app.appName, seconds: 0, total: 0, valueText: energyText(app.joules),
-                         share: total > 0 ? app.joules / total : 0)
+            ForEach(rows.prefix(20)) { app in
+                UsageRow(color: .orange, name: app.appName, seconds: 0, total: 0,
+                         valueText: byCPU ? Format.duration(app.cpuSeconds) : energyText(app.joules),
+                         share: byCPU ? (totalCPU > 0 ? app.cpuSeconds / totalCPU : 0) : app.joules / total)
             }
-            Text(L.tr("По данным macOS о каждом процессе (как колонка «Энергия» в Мониторе системы). Системные процессы macOS не учитываются.",
-                      "From macOS per-process data (like the Energy column in Activity Monitor). macOS system processes are not included."))
+            Text(L.tr("По счётчикам энергии ядра macOS для каждого процесса; помощники приложения (например, вкладки Chrome) засчитываются самому приложению. Системные процессы macOS не учитываются.",
+                      "From macOS kernel per-process energy counters; an app's helpers (e.g. Chrome tabs) count towards the app. macOS system processes are not included."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

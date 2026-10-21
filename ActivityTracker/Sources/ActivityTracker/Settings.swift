@@ -49,6 +49,8 @@ final class Settings: ObservableObject {
     @Published var countMediaAsActive: Bool { didSet { defaults.set(countMediaAsActive, forKey: Keys.countMedia) } }
     @Published var recordTitles: Bool { didSet { defaults.set(recordTitles, forKey: Keys.recordTitles) } }
     @Published var recordURLs: Bool { didSet { defaults.set(recordURLs, forKey: Keys.recordURLs) } }
+    /// Safari: count the time, but record neither sites nor titles (its private windows can't always be detected).
+    @Published var hideSafariDetails: Bool { didSet { defaults.set(hideSafariDetails, forKey: Keys.hideSafariDetails) } }
     @Published var appearance: Appearance {
         didSet {
             defaults.set(appearance.rawValue, forKey: Keys.appearance)
@@ -81,6 +83,7 @@ final class Settings: ObservableObject {
         static let countMedia = "countMediaAsActive"
         static let recordTitles = "recordTitles"
         static let recordURLs = "recordURLs"
+        static let hideSafariDetails = "hideSafariDetails"
         static let appearance = "appearance"
         static let alwaysShowInDock = "alwaysShowInDock"
         static let language = "language"
@@ -99,6 +102,7 @@ final class Settings: ObservableObject {
             Keys.countMedia: true,
             Keys.recordTitles: true,
             Keys.recordURLs: true,
+            Keys.hideSafariDetails: false,
             Keys.appearance: Appearance.system.rawValue,
             Keys.alwaysShowInDock: false,
             Keys.language: AppLanguage.system.rawValue,
@@ -111,6 +115,7 @@ final class Settings: ObservableObject {
         countMediaAsActive = defaults.bool(forKey: Keys.countMedia)
         recordTitles = defaults.bool(forKey: Keys.recordTitles)
         recordURLs = defaults.bool(forKey: Keys.recordURLs)
+        hideSafariDetails = defaults.bool(forKey: Keys.hideSafariDetails)
         appearance = Appearance(rawValue: defaults.string(forKey: Keys.appearance) ?? "") ?? .system
         alwaysShowInDock = defaults.bool(forKey: Keys.alwaysShowInDock)
         language = AppLanguage(rawValue: defaults.string(forKey: Keys.language) ?? "") ?? .system

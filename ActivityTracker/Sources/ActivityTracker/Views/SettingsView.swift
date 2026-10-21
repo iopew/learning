@@ -72,6 +72,13 @@ struct SettingsView: View {
                 }
 
                 Toggle(L.tr("Записывать сайты из браузеров", "Record sites from browsers"), isOn: $settings.recordURLs)
+                Toggle(L.tr("Safari: не записывать сайты и заголовки (только время)",
+                            "Safari: don't record sites or titles (time only)"), isOn: $settings.hideSafariDetails)
+                Text(L.tr("Приватные окна Chrome, Яндекса, Edge, Brave и Arc распознаются и не записываются. У Safari такого признака нет — приложение пробует узнать это по меню «Окно», но надёжнее включить этот переключатель.",
+                          "Private windows of Chrome, Yandex, Edge, Brave and Arc are recognised and not recorded. Safari has no such signal — the app tries its Window menu, but this switch is the reliable option."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 if settings.recordURLs {
                     Text(L.tr("При первом открытии каждого браузера macOS спросит, можно ли ActivityTracker управлять им — нажмите «Разрешить». Firefox адреса не отдаёт, для него пишется только заголовок окна.", "The first time each browser is used, macOS asks whether ActivityTracker may control it — click Allow. Firefox does not share addresses; only its window title is recorded."))
                         .font(.caption)

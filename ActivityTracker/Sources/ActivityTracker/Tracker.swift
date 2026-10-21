@@ -96,13 +96,15 @@ final class Tracker: ObservableObject {
 
         var sample = Sample(bundleID: bundleID, appName: app.localizedName ?? bundleID)
         let isBrowser = BrowserURL.isBrowser(bundleID)
+        // Safari's private windows can't always be recognised: the user may keep Safari to app time only.
+        let hidesDetails = settings.hideSafariDetails && BrowserURL.isSafari(bundleID)
         // Browsers' titles are read even when titles aren't recorded: Firefox shows private windows only there.
         let title = settings.recordTitles || isBrowser
             ? String(WindowTitle.focusedWindowTitle(of: app.processIdentifier).prefix(300)) : ""
         if isBrowser {
             // Both lookups only read caches filled in the background: the tick never waits for a browser.
             let lookup = BrowserURLCache.shared.lookup(bundleID: bundleID, pid: app.processIdentifier, title: title)
-            let badge = PrivateWindowDetector.verdict(for: app.processIdentifier)
+            let badge = PrivateWindowDetector.verdict(for: app.processIdentifier, bundleID: bundleID)
             // Private windows leave no trace at all: not the time, not the site, not the title.
             // Three independent signals: the browser's AppleScript, Firefox's title, the incognito badge in the UI.
             if lookup == .url(BrowserURL.privateMarker) || BrowserURL.isPrivateWindowTitle(title, bundleID: bundleID)
@@ -111,9 +113,11 @@ final class Tracker: ObservableObject {
             }
             // A window/page seen for the first time is being checked in the background: skip this one tick.
             if badge == .unknown || lookup == .waiting { return }
-            if settings.recordURLs, case .url(let url) = lookup { sample.url = String(url.prefix(2000)) }
+            if settings.recordURLs && !hidesDetails, case .url(let url) = lookup {
+                sample.url = String(url.prefix(2000))
+            }
         }
-        if settings.recordTitles { sample.title = title }
+        if settings.recordTitles && !hidesDetails { sample.title = title }
 
         do {
             try store.record(sample, at: now, interval: Self.interval)

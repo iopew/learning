@@ -79,16 +79,16 @@ enum PrivateWindowDetector {
     /// Lower-case badge texts. Matched as the whole label or its first/last word, so a page or bookmark that merely
     /// mentions "incognito" in a longer text doesn't count.
     static let markers = [
-        "incognito", "инкогнито", "режим инкогнито", "inprivate", "private browsing", "private window", "private",
-        "частный доступ", "приватный режим", "приватное окно", "приватный просмотр", "приватный",
+        "incognito", "инкогнито", "режим инкогнито", "inprivate", "private browsing", "private window",
+        "частный доступ", "приватный режим", "приватное окно", "приватный просмотр",
     ]
 
     private static let lock = NSLock()
-    private static var verdicts: [CFHashCode: Bool] = [:]
+    private static var verdicts: [CFHashCode: (isPrivate: Bool, checked: Date)] = [:]
     private static var scanning: Set<CFHashCode> = []
     private static let queue = DispatchQueue(label: "ActivityTracker.private-window", qos: .utility)
 
-    static func verdict(for pid: pid_t) -> Verdict {
+    static func verdict(for pid: pid_t, bundleID: String) -> Verdict {
         guard AXIsProcessTrusted() else { return .normal }   // nothing to look at without the permission
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.3)
@@ -97,22 +97,34 @@ enum PrivateWindowDetector {
               let value, CFGetTypeID(value) == AXUIElementGetTypeID()
         else { return .normal }
         let window = value as! AXUIElement
+
+        // Instant signals. Chromium browsers add " (Incognito)" / « (Инкогнито)» to the window's accessible title;
+        // Arc names incognito windows "bigIncognitoBrowserWindow-…".
+        if let title = text(window, kAXTitleAttribute), titleSaysPrivate(title) { return .privateWindow }
+        if let identifier = text(window, "AXIdentifier"), identifier.lowercased().contains("incognito") {
+            return .privateWindow
+        }
+
         let key = CFHash(window)
 
         lock.lock()
         defer { lock.unlock() }
-        if let known = verdicts[key] { return known ? .privateWindow : .normal }
-        if !scanning.contains(key) {
+        let known = verdicts[key]
+        let fresh = known.map { Date().timeIntervalSince($0.checked) < 600 } ?? false
+        if !fresh && !scanning.contains(key) {
             scanning.insert(key)
             queue.async {
-                let isPrivate = scan(window)
+                // Safari has no badge: its Window menu says "Move Tab to New Private Window" instead.
+                let isPrivate = BrowserURL.isSafari(bundleID) ? safariWindowMenuSaysPrivate(pid: pid) : scan(window)
                 lock.lock()
                 if verdicts.count > 200 { verdicts.removeAll() }
-                verdicts[key] = isPrivate
+                verdicts[key] = (isPrivate, Date())
                 scanning.remove(key)
                 lock.unlock()
             }
         }
+        // While a re-check runs, the previous verdict stands; only a never-seen window is "unknown".
+        if let known { return known.isPrivate ? .privateWindow : .normal }
         return .unknown
     }
 
@@ -136,6 +148,42 @@ enum PrivateWindowDetector {
             }
         }
         return false
+    }
+
+    static func titleSaysPrivate(_ title: String) -> Bool {
+        let text = title.lowercased()
+        return ["(incognito)", "(инкогнито)", "(inkognito)", "(private)", "(приватное)", "(приватный)", "inprivate"]
+            .contains { text.contains($0) }
+    }
+
+    /// Safari's Window menu has "Move Tab to New Private Window" (ru: «Переместить вкладку в новое частное окно»)
+    /// while a private window is in front, "… New Window" otherwise. Read through Accessibility without opening it.
+    static func safariWindowMenuSaysPrivate(pid: pid_t) -> Bool {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.5)
+        var bar: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXMenuBarAttribute as CFString, &bar) == .success, let bar,
+              CFGetTypeID(bar) == AXUIElementGetTypeID()
+        else { return false }
+        for item in children(bar as! AXUIElement) {
+            guard let title = text(item, kAXTitleAttribute)?.lowercased(), title == "window" || title == "окно" else {
+                continue
+            }
+            for menu in children(item) {
+                for entry in children(menu) {
+                    guard let label = text(entry, kAXTitleAttribute)?.lowercased() else { continue }
+                    let movesTab = label.contains("move tab to new") || label.contains("переместить вкладку")
+                    if movesTab && (label.contains("private") || label.contains("частн")) { return true }
+                }
+            }
+        }
+        return false
+    }
+
+    private static func children(_ element: AXUIElement) -> [AXUIElement] {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &value) == .success else { return [] }
+        return value as? [AXUIElement] ?? []
     }
 
     static func matches(_ label: String) -> Bool {
@@ -183,6 +231,10 @@ enum BrowserURL {
     private static let errorLock = NSLock()
 
     static let notPermittedError = -1743
+
+    static func isSafari(_ bundleID: String) -> Bool {
+        safariFamily.contains(bundleID)
+    }
 
     static func isBrowser(_ bundleID: String) -> Bool {
         safariFamily.contains(bundleID) || chromiumFamily.contains(bundleID) || firefoxFamily.contains(bundleID)
@@ -301,7 +353,9 @@ final class BrowserURLCache {
         defer { lock.unlock() }
 
         let entry = entries[key]
-        if (entry == nil || now.timeIntervalSince(entry!.fetchedAt) > 15) && inFlight[key] == nil {
+        // Without a window title (no Accessibility permission) a new page can't be told apart: refresh more often.
+        let maxAge: TimeInterval = title.isEmpty ? 5 : 15
+        if (entry == nil || now.timeIntervalSince(entry!.fetchedAt) > maxAge) && inFlight[key] == nil {
             inFlight[key] = now
             queue.async { [self] in
                 let url = BrowserURL.fetchURL(bundleID: bundleID)

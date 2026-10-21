@@ -3,6 +3,13 @@ import ApplicationServices
 import SwiftUI
 import ActivityCore
 
+/// Which screen is open where. Lives outside the views so that rebuilding them (language switch) keeps it.
+final class UIState: ObservableObject {
+    @Published var popoverShowsSettings = false
+    @Published var windowShowsSettings = false
+    @Published var windowPane: MainWindowView.Pane = .activity
+}
+
 /// Long-lived objects shared by the scenes and the views.
 final class AppServices {
     static let shared = AppServices()
@@ -14,6 +21,7 @@ final class AppServices {
     let windowStats: StatsModel
     let updater: Updater
     let sampler: SystemSampler
+    let ui = UIState()
     let databaseURL: URL
     let startupError: String?
 
@@ -126,6 +134,7 @@ struct ActivityTrackerApp: App {
                 .environmentObject(stats)
                 .environmentObject(settings)
                 .environmentObject(updater)
+                .environmentObject(AppServices.shared.ui)
         } label: {
             if settings.menuBarStyle == .time {
                 Text(Format.duration(tracker.todayTotal))

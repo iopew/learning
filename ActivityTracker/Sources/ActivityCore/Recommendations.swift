@@ -40,7 +40,9 @@ public enum Recommendations {
         "com.operasoftware.Opera",
     ]
 
-    static let breakGap = 5       // minutes without activity that count as a break
+    /// Empty minutes that make a break. Recording stops only after the idle threshold (3 min by default), so a real
+    /// 5-minute break leaves just ~2 empty minutes.
+    static let breakGap = 2
     static let longStreak: TimeInterval = 90 * 60
 
     public static func make(_ input: RecommendationInput) -> [Recommendation] {
@@ -219,6 +221,13 @@ public enum Recommendations {
     static func currentStreak(minutes: [MinuteCell?], endingAt minute: Int) -> TimeInterval {
         guard !minutes.isEmpty else { return 0 }
         var index = min(minute, minutes.count - 1)
+        // The user may be on a break right now: that time doesn't belong to any streak.
+        var trailing = 0
+        while index >= 0 && minutes[index] == nil {
+            trailing += 1
+            if trailing >= breakGap { return 0 }
+            index -= 1
+        }
         var active = 0
         var empty = 0
         while index >= 0 {

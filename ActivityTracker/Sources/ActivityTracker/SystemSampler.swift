@@ -4,8 +4,8 @@ import IOKit
 import ActivityCore
 
 /// Once a minute, on a background queue: battery (IOKit AppleSmartBattery), CPU and memory (Mach host statistics),
-/// swap, disk, thermal state, and how much energy / CPU every app used (proc_pid_rusage — the numbers behind the
-/// Energy column of Activity Monitor). Costs a few milliseconds per minute.
+/// swap, disk, thermal state, and how much energy / CPU every app used (proc_pid_rusage V6: the kernel's own
+/// per-process energy counter, Apple Silicon). Costs a few milliseconds per minute.
 final class SystemSampler {
     static let interval: TimeInterval = 60
 
@@ -38,11 +38,23 @@ final class SystemSampler {
         timer = nil
     }
 
+    /// Deletes battery/system history together with the activity data (see DataEraser).
+    func erase(_ what: ActivityStore.Erase) {
+        queue.async { [store] in
+            do {
+                try store.erase(what)
+            } catch {
+                NSLog("ActivityTracker: erase system data: \(error)")
+            }
+            DispatchQueue.main.async { NotificationCenter.default.post(name: .activityDataChanged, object: nil) }
+        }
+    }
+
     private func sample() {
         queue.async { [self] in
             let now = Date()
-            // Time this sample stands for: normally a minute; after sleep, no more than two.
-            let elapsed = lastSampleAt.map { min(max(now.timeIntervalSince($0), 1), 2 * Self.interval) } ?? Self.interval
+            // Time this sample stands for: normally a minute; never more (after sleep the gap was not "on battery").
+            let elapsed = lastSampleAt.map { min(max(now.timeIntervalSince($0), 1), Self.interval) } ?? Self.interval
             lastSampleAt = now
 
             var sample = SystemSample(at: now)
@@ -179,6 +191,8 @@ enum BatteryReader {
 }
 
 /// Per-app energy and CPU time between calls, from proc_pid_rusage of every process the user owns.
+/// Energy is `ri_energy_nj`, the process's own CPU/GPU energy (`ri_billed_energy` would be what *other* processes
+/// spent on its behalf). Intel Macs have no such counter (it stays 0); the UI then ranks apps by CPU time.
 /// Helper processes are attributed to the app bundle they live in (Chrome's renderers count as Chrome).
 final class EnergyMeter {
     private struct Counters {
@@ -218,15 +232,15 @@ final class EnergyMeter {
         var perApp: [String: (owner: Owner, joules: Double, cpu: Double)] = [:]
 
         for pid in Self.allPIDs() where pid > 0 {
-            var usage = rusage_info_v4()
+            var usage = rusage_info_v6()
             let result = withUnsafeMutablePointer(to: &usage) {
                 $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) {
-                    proc_pid_rusage(pid, RUSAGE_INFO_V4, $0)
+                    proc_pid_rusage(pid, RUSAGE_INFO_V6, $0)
                 }
             }
             guard result == 0 else { continue }   // other users' processes (root daemons) are not readable
             let key = ProcessKey(pid: pid, started: usage.ri_proc_start_abstime)
-            let counters = Counters(energy: usage.ri_billed_energy, cpu: usage.ri_user_time + usage.ri_system_time)
+            let counters = Counters(energy: usage.ri_energy_nj, cpu: usage.ri_user_time + usage.ri_system_time)
             current[key] = counters
             guard !isFirst else { continue }
 
@@ -260,7 +274,10 @@ final class EnergyMeter {
         let path = String(cString: buffer)
 
         let owner: Owner
-        if let range = path.range(of: ".app/") {
+        if path.contains("/com.apple.WebKit.") {
+            // Safari's (and Mail's) web pages run in shared WebKit helper processes outside any .app bundle.
+            owner = Owner(bundleID: "com.apple.WebKit", name: L.tr("Веб-страницы (Safari и др.)", "Web pages (Safari etc.)"))
+        } else if let range = path.range(of: ".app/") {
             let bundlePath = String(path[..<range.lowerBound]) + ".app"
             if let known = bundles[bundlePath] {
                 owner = known

@@ -11,7 +11,7 @@ struct PopoverView: View {
     @EnvironmentObject private var stats: StatsModel
     @EnvironmentObject private var settings: Settings
 
-    @State private var showSettings = false
+    @EnvironmentObject private var ui: UIState
     @State private var isOpen = false
 
     var body: some View {
@@ -27,7 +27,7 @@ struct PopoverView: View {
                     .padding(.bottom, 6)
             }
             Divider()
-            if showSettings {
+            if ui.popoverShowsSettings {
                 SettingsView(databaseURL: databaseURL)
             } else {
                 ScrollView {
@@ -60,7 +60,7 @@ struct PopoverView: View {
         .onDisappear { isOpen = false }
         .onReceive(tracker.$todayTotal) { _ in
             // Keep the numbers in step with the menu bar counter while the window is open.
-            if isOpen && !showSettings { stats.refreshIfLive() }
+            if isOpen && !ui.popoverShowsSettings { stats.refreshIfLive() }
         }
     }
 
@@ -75,11 +75,11 @@ struct PopoverView: View {
                 Label(L.tr("Окно", "Window"), systemImage: "macwindow")
             }
             Button {
-                showSettings.toggle()
-                if !showSettings { stats.reload() }
+                ui.popoverShowsSettings.toggle()
+                if !ui.popoverShowsSettings { stats.reload() }
             } label: {
-                Label(showSettings ? L.tr("Статистика", "Statistics") : L.tr("Настройки", "Settings"),
-                      systemImage: showSettings ? "chart.bar.xaxis" : "gearshape")
+                Label(ui.popoverShowsSettings ? L.tr("Статистика", "Statistics") : L.tr("Настройки", "Settings"),
+                      systemImage: ui.popoverShowsSettings ? "chart.bar.xaxis" : "gearshape")
             }
             QuitButton()
         }
@@ -292,7 +292,7 @@ struct PauseButton: View {
         Button {
             tracker.setPaused(!settings.isPaused)
         } label: {
-            Label(settings.isPaused ? L.tr("Продолжить", "Resume") : L.tr("Пауза", "Paused"),
+            Label(settings.isPaused ? L.tr("Продолжить", "Resume") : L.tr("Пауза", "Pause"),
                   systemImage: settings.isPaused ? "play.fill" : "pause.fill")
         }
     }

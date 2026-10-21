@@ -27,7 +27,7 @@ final class Updater: ObservableObject {
     let currentVersion: String
 
     private let settings: Settings
-    private let session: URLSession
+    private let queue = DispatchQueue(label: "ActivityTracker.updater", qos: .utility)
     private var timer: Timer?
 
     init(settings: Settings) {
@@ -35,10 +35,6 @@ final class Updater: ObservableObject {
         currentBuild = Int(info["CFBundleVersion"] as? String ?? "") ?? 0
         currentVersion = info["CFBundleShortVersionString"] as? String ?? "?"
         self.settings = settings
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 30
-        configuration.timeoutIntervalForResource = 600
-        session = URLSession(configuration: configuration)
     }
 
     var isBusy: Bool {
@@ -70,21 +66,35 @@ final class Updater: ObservableObject {
         guard !isBusy, userInitiated || settings.checkForUpdates else { return }
         phase = .checking
 
-        var request = URLRequest(url: Self.releasesURL)
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("ActivityTracker/\(currentBuild)", forHTTPHeaderField: "User-Agent")
         let currentBuild = currentBuild
-        session.dataTask(with: request) { data, response, error in
-            let result: Result<AvailableUpdate?, Error>
-            if let error {
-                result = .failure(error)
-            } else if let status = (response as? HTTPURLResponse)?.statusCode, status != 200 {
-                result = .failure(UpdateError.http(status))
-            } else {
-                result = Result { try UpdateFeed.newest(in: data ?? Data(), newerThan: currentBuild) }
+        queue.async {
+            let result = Result { () -> AvailableUpdate? in
+                let json = try Self.fetch(Self.releasesURL, timeout: 30)
+                return try UpdateFeed.newest(in: json, newerThan: currentBuild)
             }
             DispatchQueue.main.async { self.finishCheck(result, userInitiated: userInitiated) }
-        }.resume()
+        }
+    }
+
+    /// Downloads with the system curl, IPv4 first: on some networks IPv6 connections to GitHub open but never
+    /// deliver data (seen on the owner's Mac), and URLSession would just hang until its timeout. Falls back to
+    /// curl's default (IPv6 allowed) for IPv6-only networks. Blocking: background queue only.
+    static func fetch(_ url: URL, to file: URL? = nil, timeout: TimeInterval) throws -> Data {
+        var lastError: Error = UpdateError.http(-1)
+        for ipVersion in ["-4", ""] {
+            var arguments = ["-fsSL", "--max-time", String(Int(timeout)), "--connect-timeout", "15",
+                             "-H", "Accept: application/vnd.github+json", "-A", "ActivityTracker"]
+            if !ipVersion.isEmpty { arguments.append(ipVersion) }
+            if let file { arguments += ["-o", file.path] }
+            arguments.append(url.absoluteString)
+            do {
+                let output = try Installer.run("/usr/bin/curl", arguments)
+                return Data(output.utf8)
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError
     }
 
     private func finishCheck(_ result: Result<AvailableUpdate?, Error>, userInitiated: Bool) {
@@ -116,16 +126,11 @@ final class Updater: ObservableObject {
         Installer.log("downloading build \(update.build) from \(update.downloadURL)")
         let reopenWindow = MainWindowController.shared.isVisible
 
-        session.downloadTask(with: update.downloadURL) { location, response, error in
+        queue.async {
             do {
-                if let error { throw error }
-                guard let location, (response as? HTTPURLResponse)?.statusCode == 200 else {
-                    throw UpdateError.http((response as? HTTPURLResponse)?.statusCode ?? -1)
-                }
-                // The temporary file is deleted when this handler returns: move it first.
                 let zip = try Installer.updatesDirectory().appendingPathComponent("build-\(update.build).zip")
                 try? FileManager.default.removeItem(at: zip)
-                try FileManager.default.moveItem(at: location, to: zip)
+                _ = try Self.fetch(update.downloadURL, to: zip, timeout: 300)
 
                 DispatchQueue.main.async { self.phase = .installing(update.build) }
                 let staged = try Installer.stage(zip: zip, expectedBuild: update.build)
@@ -142,7 +147,7 @@ final class Updater: ObservableObject {
                     self.phase = .failed(L.tr("Не удалось обновиться: \(error.localizedDescription)", "Update failed: \(error.localizedDescription)"))
                 }
             }
-        }.resume()
+        }
     }
 }
 

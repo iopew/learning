@@ -15,6 +15,7 @@ public final class SystemStore {
         try db.execute("""
             PRAGMA journal_mode=WAL;
             PRAGMA synchronous=NORMAL;
+            PRAGMA secure_delete=ON;
             CREATE TABLE IF NOT EXISTS system_samples(
                 at REAL PRIMARY KEY,
                 day TEXT NOT NULL,
@@ -35,16 +36,18 @@ public final class SystemStore {
                 thermal INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS system_samples_day ON system_samples(day);
-            CREATE TABLE IF NOT EXISTS app_energy(
-                at REAL NOT NULL,
+            CREATE TABLE IF NOT EXISTS app_energy_hourly(
+                hour REAL NOT NULL,
                 day TEXT NOT NULL,
                 bundle_id TEXT NOT NULL,
                 app TEXT NOT NULL,
                 joules REAL NOT NULL,
                 cpu_seconds REAL NOT NULL,
-                on_battery INTEGER NOT NULL
+                on_battery INTEGER NOT NULL,
+                PRIMARY KEY(hour, bundle_id, on_battery)
             );
-            CREATE INDEX IF NOT EXISTS app_energy_day ON app_energy(day);
+            CREATE INDEX IF NOT EXISTS app_energy_hourly_day ON app_energy_hourly(day);
+            DROP TABLE IF EXISTS app_energy;
             CREATE TABLE IF NOT EXISTS charge_events(
                 at REAL NOT NULL,
                 day TEXT NOT NULL,
@@ -85,10 +88,18 @@ public final class SystemStore {
                            [.double(at), .text(day), .int(sample.onAC ? 1 : 0), optional(sample.batteryPercent)])
             }
 
-            for app in energy where app.joules > 0 || app.cpuSeconds > 0 {
+            // One row per app per hour (and power source): a year stays in the hundreds of thousands of rows.
+            let hour = (at / 3600).rounded(.down) * 3600
+            for app in energy where app.joules >= 0.01 || app.cpuSeconds >= 0.01 {
                 try db.run(
-                    "INSERT INTO app_energy(at, day, bundle_id, app, joules, cpu_seconds, on_battery) VALUES(?,?,?,?,?,?,?)",
-                    [.double(at), .text(day), .text(app.bundleID), .text(app.appName), .double(app.joules),
+                    """
+                    INSERT INTO app_energy_hourly(hour, day, bundle_id, app, joules, cpu_seconds, on_battery)
+                    VALUES(?,?,?,?,?,?,?)
+                    ON CONFLICT(hour, bundle_id, on_battery) DO UPDATE SET
+                        joules = joules + excluded.joules, cpu_seconds = cpu_seconds + excluded.cpu_seconds,
+                        app = excluded.app
+                    """,
+                    [.double(hour), .text(day), .text(app.bundleID), .text(app.appName), .double(app.joules),
                      .double(app.cpuSeconds), .int(sample.onAC ? 0 : 1)])
             }
             try db.execute("COMMIT")
@@ -97,6 +108,28 @@ public final class SystemStore {
             throw error
         }
         lastOnAC = sample.onAC
+    }
+
+    /// Mirrors ActivityStore.erase for the battery/system history.
+    public func erase(_ what: ActivityStore.Erase) throws {
+        lock.lock()
+        defer { lock.unlock() }
+
+        switch what {
+        case .domain:
+            return   // no per-site data here
+        case .app(let bundleID):
+            try db.run("DELETE FROM app_energy_hourly WHERE bundle_id = ?", [.text(bundleID)])
+        case .since(let moment):
+            let time = SQLValue.double(moment.timeIntervalSince1970)
+            let hour = SQLValue.double((moment.timeIntervalSince1970 / 3600).rounded(.down) * 3600)
+            try db.run("DELETE FROM system_samples WHERE at >= ?", [time])
+            try db.run("DELETE FROM charge_events WHERE at >= ?", [time])
+            try db.run("DELETE FROM app_energy_hourly WHERE hour >= ?", [hour])
+        case .all:
+            try db.execute("DELETE FROM system_samples; DELETE FROM charge_events; DELETE FROM app_energy_hourly;")
+        }
+        try db.execute("PRAGMA wal_checkpoint(TRUNCATE);")
     }
 
     private func optional(_ value: Double?) -> SQLValue {
@@ -232,7 +265,7 @@ public final class SystemStore {
         func energy(onBatteryOnly: Bool) throws -> [EnergyUsage] {
             try db.query(
                 """
-                SELECT bundle_id, MAX(app), SUM(joules) AS j, SUM(cpu_seconds) FROM app_energy
+                SELECT bundle_id, MAX(app), SUM(joules) AS j, SUM(cpu_seconds) FROM app_energy_hourly
                 WHERE \(inWindow) \(onBatteryOnly ? "AND on_battery = 1" : "")
                 GROUP BY bundle_id ORDER BY j DESC LIMIT 25
                 """, window

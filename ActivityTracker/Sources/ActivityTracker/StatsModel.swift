@@ -30,7 +30,9 @@ final class StatsModel: ObservableObject {
         self.days = store.days
         for name in [Notification.Name.activityDataChanged, .languageChanged] {
             NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                self?.reload()
+                guard let self else { return }
+                queue.async { self.baselineCache = nil }   // deleted data must not linger in the usual day
+                reload()
             }
         }
     }
@@ -46,16 +48,14 @@ final class StatsModel: ObservableObject {
         if followsToday { anchor = Date() }   // after midnight "today" is a new day
         lastLoad = Date()
         generation += 1
-        let request = (generation: generation, range: range, anchor: anchor, today: followsToday)
+        let request = (generation: generation, range: range, anchor: anchor, today: followsToday && isAtToday)
         queue.async { [self] in
             let result = Result { () -> (Report, SystemReport, [Recommendation]) in
                 let report = try store.report(range: request.range, anchor: request.anchor)
                 let system = try systemStore.report(range: request.range, anchor: request.anchor)
-                var tips: [Recommendation] = []
-                if request.today {
-                    tips = try todayTips(dayReport: request.range == .day ? report : nil,
-                                         daySystem: request.range == .day ? system : nil)
-                }
+                // Tips are always about today, whatever period the user is looking at.
+                let sameDay = request.today && request.range == .day
+                let tips = try todayTips(dayReport: sameDay ? report : nil, daySystem: sameDay ? system : nil)
                 return (report, system, tips)
             }
             DispatchQueue.main.async {

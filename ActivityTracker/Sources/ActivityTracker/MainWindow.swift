@@ -49,6 +49,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             .environmentObject(services.windowStats)
             .environmentObject(services.settings)
             .environmentObject(services.updater)
+            .environmentObject(services.ui)
         let hosting = NSHostingController(rootView: root)
         hosting.sizingOptions = []
 
@@ -133,8 +134,7 @@ struct MainWindowView: View {
     @EnvironmentObject private var settings: Settings
     @EnvironmentObject private var updater: Updater
 
-    @State private var showSettings = false
-    @State private var pane: Pane = .activity
+    @EnvironmentObject private var ui: UIState
 
     enum Pane: String, CaseIterable, Identifiable {
         case activity, battery, system, tips
@@ -161,7 +161,7 @@ struct MainWindowView: View {
                     PauseButton()
                     ForgetMenu()
                     Button {
-                        showSettings = true
+                        ui.windowShowsSettings = true
                     } label: {
                         Label(L.tr("Настройки", "Settings"), systemImage: "gearshape")
                     }
@@ -178,7 +178,7 @@ struct MainWindowView: View {
                     .padding(.horizontal, 24)
                     .padding(.bottom, 8)
             }
-            Picker(L.tr("Раздел", "Section"), selection: $pane) {
+            Picker(L.tr("Раздел", "Section"), selection: $ui.windowPane) {
                 ForEach(Pane.allCases) { item in
                     Text(item.title + (item == .tips && !stats.tips.isEmpty ? " (\(stats.tips.count))" : "")).tag(item)
                 }
@@ -188,7 +188,7 @@ struct MainWindowView: View {
             .frame(maxWidth: 520)
             .padding(.bottom, 12)
             Divider()
-            switch pane {
+            switch ui.windowPane {
             case .activity: activity
             case .battery: single { if let system = stats.system { BatteryPanel(system: system, chartHeight: 220) } }
             case .system: single { if let system = stats.system { SystemPanel(system: system, chartHeight: 200) } }
@@ -214,13 +214,13 @@ struct MainWindowView: View {
         .onReceive(tracker.$todayTotal) { _ in
             if MainWindowController.shared.isVisible { stats.refreshIfLive() }
         }
-        .sheet(isPresented: $showSettings) {
+        .sheet(isPresented: $ui.windowShowsSettings) {
             VStack(spacing: 0) {
                 SettingsView(databaseURL: databaseURL)
                 Divider()
                 HStack {
                     Spacer()
-                    Button(L.tr("Готово", "Done")) { showSettings = false }
+                    Button(L.tr("Готово", "Done")) { ui.windowShowsSettings = false }
                         .keyboardShortcut(.defaultAction)
                 }
                 .padding(12)
@@ -228,6 +228,7 @@ struct MainWindowView: View {
             .frame(width: 520, height: 640)
             .environmentObject(settings)
             .environmentObject(updater)
+            .environmentObject(ui)
         }
     }
 
