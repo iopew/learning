@@ -4,6 +4,9 @@ on:
   push:
     paths:
       - "ActivityTracker/**"
+      - "!ActivityTracker/docs/**"
+      - "!ActivityTracker/WIP/**"
+      - "!ActivityTracker/**/*.md"
       - ".github/workflows/activity-tracker.yml"
   workflow_dispatch:
 
@@ -137,8 +140,13 @@ jobs:
           notes="$(git log -1 --format=%s)
 
           Ветка ${GITHUB_REF_NAME}, коммит ${GITHUB_SHA::7}."
-          gh release create "$tag" .build/ActivityTracker.zip --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "ActivityTracker — сборка $BUILD_NUMBER" --notes "$notes"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # A re-run of the same workflow run: refresh the asset instead of failing.
+            gh release upload "$tag" .build/ActivityTracker.zip --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$tag" .build/ActivityTracker.zip --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "ActivityTracker — сборка $BUILD_NUMBER" --notes "$notes"
+          fi
           # Keep the five newest builds.
           gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq '.[].tagName' \
             | grep '^activity-tracker-build-' | sort -t- -k4 -n -r | tail -n +6 \

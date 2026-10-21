@@ -1,5 +1,4 @@
 import AppKit
-import Carbon.HIToolbox
 import SwiftUI
 import ActivityCore
 
@@ -81,9 +80,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if Self.allowQuit { return .terminateNow }
-        // ⌘Q (any keyboard layout) while the window is in front: close the window, keep recording.
+        // ⌘Q while the window is in front (the quit request comes from a ⌘-key press, whatever the layout):
+        // close the window, keep recording.
         if MainWindowController.shared.isVisible, let event = NSApp.currentEvent, event.type == .keyDown,
-           event.keyCode == UInt16(kVK_ANSI_Q), event.modifierFlags.contains(.command) {
+           event.modifierFlags.contains(.command) {
             MainWindowController.shared.close()
             return .terminateCancel
         }

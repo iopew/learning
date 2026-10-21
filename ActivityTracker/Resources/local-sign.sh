@@ -49,8 +49,10 @@ EOF
     # create-keychain adds the new keychain to the user's search list; the list is put back right away so other
     # apps never see (or ask to unlock) this keychain.
     save_search_list
+    trap restore_search_list EXIT   # even if creation fails half-way
     security create-keychain -p "$PASSWORD" "$KEYCHAIN"
     restore_search_list
+    trap - EXIT
     security set-keychain-settings "$KEYCHAIN"   # no auto-lock
     security unlock-keychain -p "$PASSWORD" "$KEYCHAIN"
     security import "$tmp/identity.p12" -k "$KEYCHAIN" -P "$PASSWORD" -T /usr/bin/codesign >/dev/null
@@ -79,7 +81,7 @@ restore_search_list() {
 }
 
 sign() {
-    security unlock-keychain -p "$PASSWORD" "$KEYCHAIN"
+    security unlock-keychain -p "$PASSWORD" "$KEYCHAIN" || return 1
     # codesign looks identities up through the search list, so the keychain is on it only while signing.
     save_search_list
     trap restore_search_list EXIT

@@ -78,9 +78,22 @@ struct ActivityTrackerApp: App {
         // A hand-installed (ad-hoc signed) copy re-signs itself once with the stable local identity and restarts.
         if Installer.adoptIfNeeded() {
             Installer.isHandingOver = true
+            // Normally the installer quits this process within seconds. If it never does, carry on as usual
+            // rather than sit there not recording.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 60) {
+                guard Installer.isHandingOver else { return }
+                Installer.log("adoption: installer did not take over, starting normally")
+                Installer.isHandingOver = false
+                Self.startServices()
+                AppServices.shared.settings.applyAppearance()
+                MainWindowController.shared.applyDockPolicy()
+            }
             return
         }
+        Self.startServices()
+    }
 
+    private static func startServices() {
         let services = AppServices.shared
         services.settings.firstRunSetup()
         services.tracker.start()

@@ -58,8 +58,10 @@ final class Updater: ObservableObject {
         timer.tolerance = 60
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
-        // Not right at launch: let the app (and the network after wake/login) settle first.
+        // Not right at launch: let the app (and the network after wake/login) settle first, and let a just-finished
+        // installer exit before its leftovers are removed.
         DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [weak self] in
+            Installer.cleanUpOldDownloads()
             self?.check(userInitiated: false)
         }
     }
@@ -125,7 +127,12 @@ final class Updater: ObservableObject {
                 DispatchQueue.main.async { self.phase = .installing(update.build) }
                 let staged = try Installer.stage(zip: zip, expectedBuild: update.build)
                 try Installer.launchInstaller(staged: staged, target: Bundle.main.bundleURL)
-                // The installer quits this app in a moment.
+                // The installer quits this app in a moment. If it doesn't, say so instead of spinning forever.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 90) {
+                    if self.phase == .installing(update.build) {
+                        self.phase = .failed("Установщик не ответил. Подробности — в журнале обновлений.")
+                    }
+                }
             } catch {
                 Installer.log("update to \(update.build) failed: \(error)")
                 DispatchQueue.main.async {
@@ -212,6 +219,7 @@ enum Installer {
         try? FileManager.default.removeItem(at: folder)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try run("/usr/bin/ditto", ["-x", "-k", zip.path, folder.path])
+        try? FileManager.default.removeItem(at: zip)
 
         let app = folder.appendingPathComponent("ActivityTracker.app")
         guard let info = NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist")) else {
@@ -255,6 +263,9 @@ enum Installer {
         // `open` returns once LaunchServices has the request; don't hang on it if it takes longer.
         let deadline = Date().addingTimeInterval(10)
         while process.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.1) }
+        if !process.isRunning && process.terminationStatus != 0 {
+            throw UpdateError.command("open", process.terminationStatus, app.path)
+        }
     }
 
     // MARK: First-run adoption
@@ -296,9 +307,21 @@ enum Installer {
         log("installer: \(source.path) → \(target.path) (build \(newBuild))")
         guard let bundleID = Bundle.main.bundleIdentifier else { return 1 }
 
+        // One installer at a time: an update and an adoption must never swap bundles concurrently.
+        guard let lock = acquireInstallLock() else {
+            log("installer: another installer is running, giving up")
+            return 1
+        }
+        defer { close(lock) }
+
+        func failed(_ reason: String) -> Int32 {
+            log("installer: \(reason)")
+            defaults.set(newBuild, forKey: failedBuildKey)   // automatic updates won't retry this build
+            return 1
+        }
         func others() -> [NSRunningApplication] {
             NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
-                .filter { $0.processIdentifier != myPID }
+                .filter { $0.processIdentifier != myPID && kill($0.processIdentifier, 0) == 0 }
         }
         func isRunning(at url: URL) -> Bool {
             others().contains { $0.bundleURL?.standardizedFileURL.path == url.standardizedFileURL.path }
@@ -314,39 +337,47 @@ enum Installer {
 
         // 2. Swap the bundles, keeping the old one for a rollback.
         let fileManager = FileManager.default
-        guard let backup = try? updatesDirectory().appendingPathComponent("previous.app") else { return 1 }
+        guard let backup = try? updatesDirectory().appendingPathComponent("previous.app") else {
+            return failed("no updates folder")
+        }
         try? fileManager.removeItem(at: backup)
         let hadOldVersion = fileManager.fileExists(atPath: target.path)
+        var movedOldVersion = false
         do {
-            if hadOldVersion { try fileManager.moveItem(at: target, to: backup) }
+            if hadOldVersion {
+                try fileManager.moveItem(at: target, to: backup)
+                movedOldVersion = true
+            }
             try run("/usr/bin/ditto", [source.path, target.path])
         } catch {
-            log("installer: copy failed: \(error)")
-            restore(backup: backup, target: target, hadOldVersion: hadOldVersion)
-            return 1
+            if movedOldVersion {
+                restore(backup: backup, target: target)
+            } else if hadOldVersion {
+                try? open(target, arguments: ["--background"])   // the old version is untouched: just restart it
+            }
+            return failed("swap failed: \(error)")
         }
 
         // 3. Start the new version and make sure it stays up.
         try? open(target, arguments: ["--background"])
         let started = wait(20, until: { isRunning(at: target) })
-        let stable = started && { Thread.sleep(forTimeInterval: 5); return isRunning(at: target) }()
+        let stable = started && { _ = wait(5, until: { false }); return isRunning(at: target) }()
         guard stable else {
-            log("installer: build \(newBuild) did not stay up, rolling back")
-            defaults.set(newBuild, forKey: failedBuildKey)
             for app in others() where app.bundleURL?.standardizedFileURL.path == target.standardizedFileURL.path {
                 app.forceTerminate()
             }
-            try? fileManager.removeItem(at: target)
-            restore(backup: backup, target: target, hadOldVersion: hadOldVersion)
-            return 1
+            if movedOldVersion {
+                restore(backup: backup, target: target)
+            }
+            return failed("build \(newBuild) did not stay up, rolled back")
         }
         defaults.removeObject(forKey: failedBuildKey)
         log("installer: build \(newBuild) installed and running")
         return 0
     }
 
-    private static func restore(backup: URL, target: URL, hadOldVersion: Bool) {
-        guard hadOldVersion else { return }
+    /// Puts the previous version back in place and starts it.
+    private static func restore(backup: URL, target: URL) {
         do {
             if FileManager.default.fileExists(atPath: target.path) { try FileManager.default.removeItem(at: target) }
             try FileManager.default.moveItem(at: backup, to: target)
@@ -354,6 +385,28 @@ enum Installer {
             log("installer: previous version restored")
         } catch {
             log("installer: ROLLBACK FAILED: \(error); previous version is at \(backup.path)")
+        }
+    }
+
+    /// An exclusive lock on Updates/install.lock, held until the installer exits; nil if someone else holds it.
+    private static func acquireInstallLock() -> Int32? {
+        guard let path = try? updatesDirectory().appendingPathComponent("install.lock").path else { return nil }
+        let descriptor = Darwin.open(path, O_CREAT | O_RDWR, 0o644)
+        guard descriptor >= 0 else { return nil }
+        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+            close(descriptor)
+            return nil
+        }
+        return descriptor
+    }
+
+    /// Removes downloads and unpacked copies left from earlier updates (the previous version is kept for rollbacks).
+    static func cleanUpOldDownloads() {
+        guard let folder = try? updatesDirectory(),
+              let items = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+        else { return }
+        for item in items where !["previous.app", "install.lock"].contains(item.lastPathComponent) {
+            try? FileManager.default.removeItem(at: item)
         }
     }
 
@@ -374,11 +427,12 @@ enum Installer {
 
     // MARK: Helpers
 
+    /// Polls `condition`, turning the run loop in between so AppKit's view of running apps stays current.
     private static func wait(_ seconds: TimeInterval, until condition: () -> Bool) -> Bool {
         let deadline = Date().addingTimeInterval(seconds)
         while Date() < deadline {
             if condition() { return true }
-            Thread.sleep(forTimeInterval: 0.25)
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
         }
         return condition()
     }
