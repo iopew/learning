@@ -67,10 +67,9 @@ final class AppServices {
 struct ActivityTrackerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
-    @StateObject private var tracker = AppServices.shared.tracker
-    @StateObject private var stats = AppServices.shared.menuStats
+    /// Only settings are observed here: every change re-evaluates the whole scene and rebuilds the main menu, so
+    /// objects that change every tick (tracker, stats, updater) are observed by the views inside, not by the App.
     @StateObject private var settings = AppServices.shared.settings
-    @StateObject private var updater = AppServices.shared.updater
 
     init() {
         let arguments = CommandLine.arguments
@@ -130,26 +129,36 @@ struct ActivityTrackerApp: App {
         MenuBarExtra(isInserted: menuBarShown) {
             PopoverView(databaseURL: AppServices.shared.databaseURL, startupError: AppServices.shared.startupError)
                 .id(settings.language)   // rebuild every text when the language changes
-                .environmentObject(tracker)
-                .environmentObject(stats)
+                .environmentObject(AppServices.shared.tracker)
+                .environmentObject(AppServices.shared.menuStats)
                 .environmentObject(settings)
-                .environmentObject(updater)
+                .environmentObject(AppServices.shared.updater)
                 .environmentObject(AppServices.shared.ui)
         } label: {
-            if settings.menuBarStyle == .time {
-                Text(Format.duration(tracker.todayTotal))
-            } else {
-                Image(systemName: statusSymbol)
-            }
+            MenuBarLabel(tracker: AppServices.shared.tracker, settings: settings)
         }
         .menuBarExtraStyle(.window)
     }
 
-    /// The item disappears when the user picks "Скрыть" (or ⌘-drags it out of the menu bar).
+    /// The item disappears when the user picks "Скрыть". Read-only on purpose: SwiftUI calls the setter whenever
+    /// the status item's visibility changes, and writing the setting back from there re-evaluated the scene, which
+    /// changed the visibility again — an endless loop that froze the app (build 8, `sample` showed it).
     private var menuBarShown: Binding<Bool> {
-        Binding(
-            get: { settings.menuBarStyle != .hidden },
-            set: { shown in if !shown { settings.menuBarStyle = .hidden } })
+        Binding(get: { settings.menuBarStyle != .hidden }, set: { _ in })
+    }
+}
+
+/// The menu bar item itself. A separate view so that the 5-second tracker updates redraw only the label.
+private struct MenuBarLabel: View {
+    @ObservedObject var tracker: Tracker
+    @ObservedObject var settings: Settings
+
+    var body: some View {
+        if settings.menuBarStyle == .time {
+            Text(Format.duration(tracker.todayTotal))
+        } else {
+            Image(systemName: statusSymbol)
+        }
     }
 
     private var statusSymbol: String {

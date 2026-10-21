@@ -53,18 +53,21 @@ final class Settings: ObservableObject {
     @Published var hideSafariDetails: Bool { didSet { defaults.set(hideSafariDetails, forKey: Keys.hideSafariDetails) } }
     @Published var appearance: Appearance {
         didSet {
+            guard appearance != oldValue else { return }
             defaults.set(appearance.rawValue, forKey: Keys.appearance)
             applyAppearance()
         }
     }
     @Published var alwaysShowInDock: Bool {
         didSet {
+            guard alwaysShowInDock != oldValue else { return }
             defaults.set(alwaysShowInDock, forKey: Keys.alwaysShowInDock)
             MainWindowController.shared.applyDockPolicy()
         }
     }
     @Published var language: AppLanguage {
         didSet {
+            guard language != oldValue else { return }
             defaults.set(language.rawValue, forKey: Keys.language)
             L.current = L.resolve(language)
             NotificationCenter.default.post(name: .languageChanged, object: nil)
