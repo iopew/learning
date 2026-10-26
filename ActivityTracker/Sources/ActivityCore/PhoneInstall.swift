@@ -13,6 +13,12 @@ public enum PhoneInstall {
         public var id: String
         public var name: String
         public var isFree: Bool
+
+        public init(id: String, name: String, isFree: Bool) {
+            self.id = id
+            self.name = name
+            self.isFree = isFree
+        }
     }
 
     public struct Device: Equatable {
