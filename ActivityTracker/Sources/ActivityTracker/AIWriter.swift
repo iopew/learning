@@ -1,4 +1,5 @@
 import Foundation
+import ActivityCore
 #if canImport(FoundationModels) && arch(arm64)
 import FoundationModels
 #endif
