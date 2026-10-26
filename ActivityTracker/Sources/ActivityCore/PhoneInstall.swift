@@ -31,22 +31,48 @@ public enum PhoneInstall {
     }
 
     /// Teams from `defaults export com.apple.dt.Xcode -` (Xcode → Settings → Accounts). Paid teams first.
+    /// Xcode versions keep them under different keys (IDEProvisioningTeamByIdentifier, IDEProvisioningTeams, …),
+    /// so every dictionary with a "teamID" anywhere in the settings counts.
     public static func teams(xcodeDefaults data: Data) -> [Team] {
-        guard let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else {
-            return []
-        }
+        guard let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) else { return [] }
         var result: [Team] = []
-        func add(_ entry: [String: Any]) {
-            guard let id = entry["teamID"] as? String, !id.isEmpty, !result.contains(where: { $0.id == id }) else { return }
-            let name = entry["teamName"] as? String ?? id
-            let isFree = (entry["isFreeProvisioningTeam"] as? Bool) ?? ((entry["teamType"] as? String) == "Personal Team")
-            result.append(Team(id: id, name: name, isFree: isFree))
+        func visit(_ value: Any, depth: Int) {
+            guard depth < 12 else { return }
+            if let entry = value as? [String: Any] {
+                if let id = (entry["teamID"] ?? entry["teamIdentifier"] ?? entry["TeamIdentifier"]) as? String,
+                   isTeamID(id), !result.contains(where: { $0.id == id }) {
+                    let name = (entry["teamName"] ?? entry["name"]) as? String ?? id
+                    let type = entry["teamType"] as? String ?? ""
+                    let isFree = (entry["isFreeProvisioningTeam"] as? Bool) ?? (type.contains("Personal") || name.contains("Personal Team"))
+                    result.append(Team(id: id, name: name, isFree: isFree))
+                }
+                entry.values.forEach { visit($0, depth: depth + 1) }
+            } else if let list = value as? [Any] {
+                list.forEach { visit($0, depth: depth + 1) }
+            } else if let data = value as? Data,
+                      let nested = try? PropertyListSerialization.propertyList(from: data, format: nil) {
+                visit(nested, depth: depth + 1)   // some settings are stored as an embedded plist
+            }
         }
-        for key in ["IDEProvisioningTeamByIdentifier", "IDEProvisioningTeams"] {
-            guard let accounts = plist[key] as? [String: Any] else { continue }
-            for case let teams as [[String: Any]] in accounts.values { teams.forEach(add) }
-        }
+        visit(plist, depth: 0)
         return result.sorted { !$0.isFree && $1.isFree }
+    }
+
+    /// Apple team IDs are 10 upper-case letters and digits.
+    static func isTeamID(_ text: String) -> Bool {
+        text.count == 10 && text.allSatisfy { ($0.isASCII && $0.isUppercase && $0.isLetter) || ($0.isASCII && $0.isNumber) }
+    }
+
+    /// The team in a signing certificate's subject ("…/OU=ABCDE12345/…" from `security find-certificate -p | openssl x509 -subject`).
+    public static func team(fromCertificateSubject subject: String) -> String? {
+        for part in subject.components(separatedBy: CharacterSet(charactersIn: "/,")) {
+            let field = part.trimmingCharacters(in: .whitespaces)
+            for prefix in ["OU=", "OU = "] where field.hasPrefix(prefix) {
+                let value = String(field.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
+                if isTeamID(value) { return value }
+            }
+        }
+        return nil
     }
 
     /// Paired iPhones from `devicectl list devices --json-output`, the cable-connected ones first.

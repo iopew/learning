@@ -18,6 +18,15 @@ final class PhoneInstallTests: XCTestCase {
         XCTAssertEqual(teams.map(\.id), ["PAID654321", "FREE123456"])
         XCTAssertTrue(teams[1].isFree)
         XCTAssertEqual(PhoneInstall.teams(xcodeDefaults: Data("junk".utf8)), [])
+
+        // A newer Xcode: another key, deeper nesting, no isFree flag.
+        let newer: [String: Any] = ["SomeNewAccountsKey": ["accounts": [["teams": [["teamID": "NEW1234567", "teamName": "Diyoz Orozov (Personal Team)"]]]]],
+                                    "Unrelated": ["teamID": "not-an-id"]]
+        let newerData = try PropertyListSerialization.data(fromPropertyList: newer, format: .xml, options: 0)
+        XCTAssertEqual(PhoneInstall.teams(xcodeDefaults: newerData), [PhoneInstall.Team(id: "NEW1234567", name: "Diyoz Orozov (Personal Team)", isFree: true)])
+        XCTAssertEqual(PhoneInstall.team(fromCertificateSubject: "subject=UID=ABC, CN=Apple Development: Diyoz Orozov (XYZ), OU=TEAM123456, O=Diyoz Orozov, C=US"), "TEAM123456")
+        XCTAssertEqual(PhoneInstall.team(fromCertificateSubject: "subject= /UID=X/CN=Apple Development/OU=AB12CD34EF/O=X"), "AB12CD34EF")
+        XCTAssertNil(PhoneInstall.team(fromCertificateSubject: "CN=nothing"))
         XCTAssertEqual(PhoneInstall.bundleID(team: "FREE123456"), "com.iopew.ActivityPhone.FREE123456")
         XCTAssertEqual(PhoneInstall.bundleID(team: "AB/../C"), "com.iopew.ActivityPhone.ABC")
     }

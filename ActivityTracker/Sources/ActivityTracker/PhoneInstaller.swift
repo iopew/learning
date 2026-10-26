@@ -87,11 +87,10 @@ final class PhoneInstaller: ObservableObject {
         let developer = xcode.appendingPathComponent("Contents/Developer").path
         let environment = ["DEVELOPER_DIR": developer]
 
-        // 2. The Apple ID signed in to Xcode.
-        let defaults = try tool("/usr/bin/defaults", ["export", "com.apple.dt.Xcode", "-"], timeout: 20)
-        guard let team = PhoneInstall.teams(xcodeDefaults: Data(defaults.output.utf8)).first else {
-            throw InstallError(message: L.tr("В Xcode не выполнен вход: Xcode → Settings → Accounts → «+» → Apple ID. Потом нажми кнопку ещё раз.",
-                                             "Xcode isn't signed in: Xcode → Settings → Accounts → “+” → Apple ID. Then press the button again."),
+        // 2. The team of the Apple ID signed in to Xcode.
+        guard let team = findTeam() else {
+            throw InstallError(message: L.tr("Не нашёл команду Apple ID. Проверь вход: Xcode → Settings → Apple Accounts. Если вход есть — открой там Personal Team, скопируй Team ID и вставь в поле ниже.",
+                                             "Couldn't find the Apple ID team. Check Xcode → Settings → Apple Accounts. If you are signed in, open Personal Team there, copy the Team ID and paste it below."),
                                fix: .signIn)
         }
         log("team \(team.name) (\(team.id)), free: \(team.isFree)")
@@ -174,6 +173,63 @@ final class PhoneInstaller: ObservableObject {
             ? L.tr("Готово: приложение открыто на \(device.name). Бесплатная подпись действует 7 дней — потом просто нажми кнопку снова.",
                    "Done: the app is open on \(device.name). The free signature lasts 7 days — then just press the button again.")
             : L.tr("Готово: приложение открыто на \(device.name).", "Done: the app is open on \(device.name).")
+    }
+
+    /// Typed by hand in Settings when nothing else finds the team.
+    static let manualTeamKey = "phoneTeamID"
+
+    /// The team to sign with: typed by hand, Xcode's settings, an Apple Development certificate, a provisioning profile.
+    private func findTeam() -> PhoneInstall.Team? {
+        if let typed = UserDefaults.standard.string(forKey: Self.manualTeamKey)?.trimmingCharacters(in: .whitespaces).uppercased(),
+           !typed.isEmpty {
+            return PhoneInstall.Team(id: typed, name: L.tr("введён вручную", "typed in"), isFree: true)
+        }
+        if let output = try? quietTool("/usr/bin/defaults", ["export", "com.apple.dt.Xcode", "-"]) {
+            if let team = PhoneInstall.teams(xcodeDefaults: Data(output.utf8)).first { return team }
+            // For the log: which settings exist (names only), to see where a newer Xcode keeps its accounts.
+            if let plist = try? PropertyListSerialization.propertyList(from: Data(output.utf8), format: nil) as? [String: Any] {
+                log("Xcode settings keys: " + plist.keys.filter { $0.localizedCaseInsensitiveContains("team") || $0.localizedCaseInsensitiveContains("account") || $0.localizedCaseInsensitiveContains("provision") }.sorted().joined(separator: ", "))
+            }
+        }
+        // A certificate Xcode created earlier: its subject carries the team (OU=…).
+        if let pems = try? quietTool("/usr/bin/security", ["find-certificate", "-a", "-c", "Apple Development", "-p"]) {
+            for block in pems.components(separatedBy: "-----END CERTIFICATE-----") where block.contains("BEGIN CERTIFICATE") {
+                let file = FileManager.default.temporaryDirectory.appendingPathComponent("activitytracker-\(UUID().uuidString).pem")
+                defer { try? FileManager.default.removeItem(at: file) }
+                guard (try? Data((block + "-----END CERTIFICATE-----\n").utf8).write(to: file)) != nil,
+                      let subject = try? quietTool("/usr/bin/openssl", ["x509", "-noout", "-subject", "-in", file.path]),
+                      let id = PhoneInstall.team(fromCertificateSubject: subject) else { continue }
+                return PhoneInstall.Team(id: id, name: "Apple Development", isFree: true)
+            }
+        }
+        // A provisioning profile Xcode downloaded earlier.
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        for folder in ["Library/Developer/Xcode/UserData/Provisioning Profiles", "Library/MobileDevice/Provisioning Profiles"] {
+            let url = home.appendingPathComponent(folder)
+            for file in (try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)) ?? []
+            where file.pathExtension == "mobileprovision" {
+                guard let decoded = try? quietTool("/usr/bin/security", ["cms", "-D", "-i", file.path]),
+                      let plist = try? PropertyListSerialization.propertyList(from: Data(decoded.utf8), format: nil) as? [String: Any],
+                      let id = (plist["TeamIdentifier"] as? [String])?.first else { continue }
+                return PhoneInstall.Team(id: id, name: plist["TeamName"] as? String ?? id, isFree: true)
+            }
+        }
+        return nil
+    }
+
+    /// A short tool run whose output isn't copied to the log (settings, certificates).
+    private func quietTool(_ path: String, _ arguments: [String]) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = arguments
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()   // read before waiting: a full pipe would stall it
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { throw InstallError(message: "\(path) \(process.terminationStatus)") }
+        return String(decoding: data, as: UTF8.self)
     }
 
     // MARK: - Running tools

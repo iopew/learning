@@ -8,6 +8,7 @@ struct PhoneSection: View {
     @ObservedObject var server: PhoneServer
     @ObservedObject var installer: PhoneInstaller
     @State private var showingCode = false
+    @State private var teamID = UserDefaults.standard.string(forKey: PhoneInstaller.manualTeamKey) ?? ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -78,10 +79,20 @@ struct PhoneSection: View {
                     NSWorkspace.shared.open(URL(string: "macappstore://apps.apple.com/app/id497799835")!)
                 }
             case .signIn:
-                Button(L.tr("Открыть Xcode", "Open Xcode")) {
-                    if let xcode = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.dt.Xcode") {
-                        NSWorkspace.shared.openApplication(at: xcode, configuration: NSWorkspace.OpenConfiguration())
+                HStack {
+                    Button(L.tr("Открыть Xcode", "Open Xcode")) {
+                        if let xcode = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.dt.Xcode") {
+                            NSWorkspace.shared.openApplication(at: xcode, configuration: NSWorkspace.OpenConfiguration())
+                        }
                     }
+                    TextField("Team ID", text: $teamID)
+                        .frame(width: 140)
+                        .onSubmit { saveTeamID() }
+                    Button(L.tr("Сохранить и установить", "Save and install")) {
+                        saveTeamID()
+                        installer.install()
+                    }
+                    .disabled(teamID.trimmingCharacters(in: .whitespaces).count != 10)
                 }
             case .none:
                 EmptyView()
@@ -118,6 +129,11 @@ struct PhoneSection: View {
                 .font(.caption)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private func saveTeamID() {
+        let value = teamID.trimmingCharacters(in: .whitespaces).uppercased()
+        UserDefaults.standard.set(value.isEmpty ? nil : value, forKey: PhoneInstaller.manualTeamKey)
     }
 
     static func qrImage(_ text: String) -> NSImage? {
