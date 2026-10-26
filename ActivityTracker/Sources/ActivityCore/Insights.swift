@@ -164,14 +164,20 @@ public struct UsageComparison: Equatable {
         }
         func rows(_ a: [String: TimeInterval], _ b: [String: TimeInterval], target: (String) -> UsageTarget,
                   name: (String) -> String) -> [ComparisonRow] {
-            Set(a.keys).union(b.keys).map { key in
-                ComparisonRow(target: target(key), name: name(key),
-                              first: firstDays > 0 ? (a[key] ?? 0) / Double(firstDays) : 0,
-                              second: secondDays > 0 ? (b[key] ?? 0) / Double(secondDays) : 0)
+            let firstCount = Double(max(firstDays, 1))
+            let secondCount = Double(max(secondDays, 1))
+            var result: [ComparisonRow] = []
+            for key in Set(a.keys).union(b.keys) {
+                let firstValue: TimeInterval = (a[key] ?? 0) / firstCount
+                let secondValue: TimeInterval = (b[key] ?? 0) / secondCount
+                let row = ComparisonRow(target: target(key), name: name(key), first: firstValue, second: secondValue)
+                if row.larger >= 60 { result.append(row) }
             }
-            .filter { $0.larger >= 60 }
-            .sorted { $0.larger > $1.larger || ($0.larger == $1.larger && $0.name < $1.name) }
-            .prefix(limit).map { $0 }
+            result.sort { left, right in
+                if left.larger != right.larger { return left.larger > right.larger }
+                return left.name < right.name
+            }
+            return Array(result.prefix(limit))
         }
         var names: [String: String] = [:]
         for day in first + second {
