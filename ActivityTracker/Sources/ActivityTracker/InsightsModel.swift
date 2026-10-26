@@ -40,8 +40,13 @@ final class InsightsModel: ObservableObject {
         didSet { if rhythmDays != oldValue { reloadRhythm() } }
     }
     @Published private(set) var rhythm: RhythmSummary?
-    /// The last 53 weeks, day by day (year calendar).
+    /// The calendar year shown in the year calendar, and its days.
+    @Published var calendarYear: Int = 0 {
+        didSet { if calendarYear != oldValue { reloadRhythm() } }
+    }
     @Published private(set) var year: [DayStat] = []
+    /// The first year with records (the year calendar goes back to it).
+    @Published private(set) var firstYear: Int?
     @Published var comparisonMode: ComparisonMode = .week {
         didSet { if comparisonMode != oldValue { reloadComparison() } }
     }
@@ -55,9 +60,14 @@ final class InsightsModel: ObservableObject {
     private var rhythmGeneration = 0
     private var comparisonGeneration = 0
 
-    init(store: ActivityStore) {
+    /// "Today" for the reports: the real one, or the last recorded day of a saved database.
+    private let now: () -> Date
+
+    init(store: ActivityStore, now: @escaping () -> Date = Date.init) {
         self.store = store
         self.days = store.days
+        self.now = now
+        calendarYear = store.days.calendar.component(.year, from: now())
         NotificationCenter.default.addObserver(forName: .activityDataChanged, object: nil, queue: .main) { [weak self] _ in
             guard let self else { return }
             if rhythm != nil { reloadRhythm() }
@@ -71,21 +81,28 @@ final class InsightsModel: ObservableObject {
         }
     }
 
+    /// The day "today" is (a saved database: its last recorded day).
+    var today: Date { days.startOfDay(now()) }
+
     func reloadRhythm() {
         rhythmGeneration += 1
         let generation = rhythmGeneration
         let count = rhythmDays
+        let shownYear = calendarYear
         queue.async { [self] in
             do {
-                let today = days.startOfDay(Date())
-                let yearStart = days.addingDays(-52 * 7, to: days.startOfWeek(today))
-                let stats = try store.dayStats(from: yearStart, to: today)
+                let today = days.startOfDay(now())
                 let from = days.addingDays(-(count - 1), to: today)
-                let summary = RhythmSummary.make(stats.filter { $0.day >= from }, days: days)
+                let summary = RhythmSummary.make(try store.dayStats(from: from, to: today), days: days)
+                let yearStart = days.date(fromKey: String(format: "%04d-01-01", shownYear)) ?? today
+                let yearEnd = min(days.date(fromKey: String(format: "%04d-12-31", shownYear)) ?? today, today)
+                let yearStats = yearStart <= yearEnd ? try store.dayStats(from: yearStart, to: yearEnd) : []
+                let first = try store.historySummary().first.map { days.calendar.component(.year, from: $0) }
                 DispatchQueue.main.async {
                     guard generation == self.rhythmGeneration else { return }
                     self.rhythm = summary
-                    self.year = stats
+                    self.year = yearStats
+                    self.firstYear = first
                     self.error = nil
                 }
             } catch {
@@ -100,7 +117,7 @@ final class InsightsModel: ObservableObject {
         let mode = comparisonMode
         queue.async { [self] in
             do {
-                let today = days.startOfDay(Date())
+                let today = days.startOfDay(now())
                 let result: UsageComparison
                 switch mode {
                 case .week, .month:
@@ -142,7 +159,7 @@ final class InsightsModel: ObservableObject {
         queue.async { [self] in
             var card = TrendCard(target: target, name: name)
             do {
-                let today = days.startOfDay(Date())
+                let today = days.startOfDay(now())
                 let from = days.addingDays(-89, to: today)
                 let history = try store.usageHistory(of: target, from: from, to: today)
                 card.trend = UsageTrend.make(daily: history.daily, from: from, to: today, days: days)

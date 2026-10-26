@@ -146,6 +146,8 @@ public final class ActivityStore {
         case app(String)
         /// Everything after this moment ("forget the last 15 minutes"); an event running across it is cut there.
         case since(Date)
+        /// Everything before this moment (clean-up of old history); an event running across it is cut there.
+        case before(Date)
         /// The whole history.
         case all
     }
@@ -172,12 +174,48 @@ public final class ActivityStore {
             affected = db.changes
             try db.run("UPDATE events SET end_at = ? WHERE end_at > ? AND start_at < ?", [time, time, time])
             affected += db.changes
+        case .before(let moment):
+            let time = SQLValue.double(moment.timeIntervalSince1970)
+            try db.run("DELETE FROM events WHERE end_at <= ?", [time])
+            affected = db.changes
+            try db.run("UPDATE events SET start_at = ? WHERE start_at < ? AND end_at > ?", [time, time, time])
+            affected += db.changes
         case .all:
             try db.run("DELETE FROM events")
             affected = db.changes
         }
         try db.execute("PRAGMA wal_checkpoint(TRUNCATE);")
         return affected
+    }
+
+    // MARK: - The database file
+
+    /// First and last recorded day and how many days have any activity.
+    public func historySummary() throws -> (first: Date?, last: Date?, days: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let row = try db.query("SELECT MIN(day), MAX(day), COUNT(DISTINCT day) FROM events") {
+            ($0.text(0), $0.text(1), Int($0.int(2)))
+        }.first ?? ("", "", 0)
+        return (days.date(fromKey: row.0), days.date(fromKey: row.1), row.2)
+    }
+
+    /// A consistent copy of the whole database file (all tables) at `path`, while recording goes on.
+    public func backup(to path: String) throws {
+        lock.lock()
+        defer { lock.unlock() }
+
+        try? FileManager.default.removeItem(atPath: path)
+        try db.run("VACUUM INTO ?", [.text(path)])
+    }
+
+    /// Rebuilds the file without free pages (after deleting a lot it shrinks).
+    public func compact() throws {
+        lock.lock()
+        defer { lock.unlock() }
+
+        try db.execute("PRAGMA wal_checkpoint(TRUNCATE); VACUUM; PRAGMA wal_checkpoint(TRUNCATE);")
     }
 
     // MARK: - Queries

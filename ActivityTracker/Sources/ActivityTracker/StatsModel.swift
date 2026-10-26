@@ -16,11 +16,13 @@ final class StatsModel: ObservableObject {
     /// Today only: switches in the last 60 minutes, and the usual rate per hour over the previous two weeks.
     @Published private(set) var lastHourSwitches: Int?
     @Published private(set) var usualSwitchesPerHour: Double?
+    @Published private(set) var network: NetworkReport?
     @Published private(set) var error: String?
 
     let days: DayCalendar
     private let store: ActivityStore
     private let systemStore: SystemStore
+    private let networkStore: NetworkStore
     private let queue = DispatchQueue(label: "ActivityTracker.stats", qos: .userInitiated)
     private var generation = 0
     private var lastLoad = Date.distantPast
@@ -31,10 +33,16 @@ final class StatsModel: ObservableObject {
     /// The usual switches per hour; only touched on `queue`.
     private var switchBaselineCache: (day: String, perHour: Double?)?
 
-    init(store: ActivityStore, systemStore: SystemStore) {
+    /// `anchor`: start on this day instead of today (a saved database: its last recorded day).
+    init(store: ActivityStore, systemStore: SystemStore, networkStore: NetworkStore, anchor: Date? = nil) {
         self.store = store
         self.systemStore = systemStore
+        self.networkStore = networkStore
         self.days = store.days
+        if let anchor {
+            self.anchor = anchor
+            followsToday = false
+        }
         for name in [Notification.Name.activityDataChanged, .languageChanged] {
             NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 guard let self else { return }
@@ -67,6 +75,7 @@ final class StatsModel: ObservableObject {
                 let sameDay = request.today && request.range == .day
                 let tips = try todayTips(dayReport: sameDay ? report : nil, daySystem: sameDay ? system : nil)
                 var loaded = Loaded(report: report, system: system, tips: tips)
+                loaded.network = try networkStore.report(range: request.range, anchor: request.anchor)
                 if let length = request.range.days, length <= 30 {
                     let spans = try store.spans(from: report.fromDay, to: report.toDay)
                     loaded.switches = Switches.stats(spans)
@@ -88,6 +97,7 @@ final class StatsModel: ObservableObject {
                     self.switches = loaded.switches
                     self.lastHourSwitches = loaded.lastHour
                     self.usualSwitchesPerHour = loaded.usualPerHour
+                    self.network = loaded.network
                     self.error = nil
                 case .failure(let error):
                     self.error = L.tr("Не удалось построить отчёт: \(error)", "Could not build the report: \(error)")
@@ -103,6 +113,7 @@ final class StatsModel: ObservableObject {
         var switches: SwitchStats?
         var lastHour: Int?
         var usualPerHour: Double?
+        var network: NetworkReport?
     }
 
     /// Runs on `queue`. Computed once a day from the previous 14 days.

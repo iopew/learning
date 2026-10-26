@@ -139,6 +139,11 @@ public final class SystemStore {
             try db.run("DELETE FROM system_samples WHERE at >= ?", [time])
             try db.run("DELETE FROM charge_events WHERE at >= ?", [time])
             try db.run("DELETE FROM app_energy_hourly WHERE hour >= ?", [hour])
+        case .before(let moment):
+            let time = SQLValue.double(moment.timeIntervalSince1970)
+            try db.run("DELETE FROM system_samples WHERE at < ?", [time])
+            try db.run("DELETE FROM charge_events WHERE at < ?", [time])
+            try db.run("DELETE FROM app_energy_hourly WHERE hour < ?", [time])
         case .all:
             try db.execute("DELETE FROM system_samples; DELETE FROM charge_events; DELETE FROM app_energy_hourly;")
         }

@@ -50,6 +50,27 @@ final class StabilityMonitor: ObservableObject {
         }
     }
 
+    /// A saved database: only show what it holds (no scanning, no boot records).
+    func openReadOnly() {
+        queue.async { [self] in
+            do {
+                store = try StabilityStore(path: path)
+            } catch {
+                publishError(L.tr("Журнал стабильности недоступен: \(error)", "Stability log unavailable: \(error)"))
+                return
+            }
+            reload()
+        }
+    }
+
+    /// Clean-up of old history.
+    func erase(before moment: Date) {
+        queue.async { [self] in
+            try? store?.erase(before: moment)
+            reload()
+        }
+    }
+
     /// Rebuilds the summary for the Stability pane.
     func reload() {
         queue.async { [self] in

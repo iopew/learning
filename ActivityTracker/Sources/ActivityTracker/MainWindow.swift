@@ -103,6 +103,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if Self.launchedByUser { MainWindowController.shared.show() }
     }
 
+    /// A saved database dropped on the app icon or opened with "Open With".
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls where url.pathExtension.lowercased() == "sqlite" { ArchiveSession.open(url) }
+    }
+
     /// Double-click in Finder / Launchpad / Dock while already running.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         MainWindowController.shared.show()
@@ -155,7 +160,7 @@ struct MainWindowView: View {
     @EnvironmentObject private var insights: InsightsModel
 
     enum Pane: String, CaseIterable, Identifiable {
-        case activity, rhythm, compare, battery, system, stability, tips
+        case activity, rhythm, compare, battery, system, network, stability, tips
 
         var id: String { rawValue }
 
@@ -166,6 +171,7 @@ struct MainWindowView: View {
             case .compare: return L.tr("Сравнение", "Compare")
             case .battery: return L.tr("Батарея", "Battery")
             case .system: return L.tr("Система", "System")
+            case .network: return L.tr("Сеть", "Network")
             case .stability: return L.tr("Стабильность", "Stability")
             case .tips: return L.tr("Советы", "Tips")
             }
@@ -215,6 +221,7 @@ struct MainWindowView: View {
             case .rhythm: RhythmPane()
             case .compare: ComparisonPane()
             case .stability: StabilityPane()
+            case .network: NetworkPane()
             case .battery: single { if let system = stats.system { BatteryPanel(system: system, chartHeight: 220) } }
             case .system: single { if let system = stats.system { SystemPanel(system: system, chartHeight: 200) } }
             case .tips:

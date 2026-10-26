@@ -4,7 +4,9 @@ import ActivityCore
 
 /// Asks for confirmation and deletes recorded data.
 enum DataEraser {
-    static func confirmAndErase(_ what: ActivityStore.Erase) {
+    /// Returns whether the data was deleted.
+    @discardableResult
+    static func confirmAndErase(_ what: ActivityStore.Erase) -> Bool {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = question(for: what)
@@ -13,9 +15,17 @@ enum DataEraser {
         alert.addButton(withTitle: L.tr("Отмена", "Cancel"))
         alert.buttons.first?.hasDestructiveAction = true
         NSApp.activate(ignoringOtherApps: true)
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        AppServices.shared.tracker.erase(what)
-        AppServices.shared.sampler.erase(what)
+        guard alert.runModal() == .alertFirstButtonReturn else { return false }
+        let services = AppServices.shared
+        services.tracker.erase(what)
+        services.sampler.erase(what)
+        do {
+            try services.networkStore.erase(what)
+        } catch {
+            NSLog("ActivityTracker: erase network data: \(error)")
+        }
+        if case .before(let moment) = what { services.stability.erase(before: moment) }
+        return true
     }
 
     private static func question(for what: ActivityStore.Erase) -> String {
@@ -29,6 +39,11 @@ enum DataEraser {
             let formatter = DateFormatter()
             formatter.dateFormat = "HH:mm"
             return L.tr("Забыть всё, что записано после \(formatter.string(from: moment))?", "Forget everything recorded after \(formatter.string(from: moment))?")
+        case .before(let moment):
+            let formatter = DateFormatter()
+            formatter.locale = L.locale
+            formatter.dateStyle = .long
+            return L.tr("Удалить всё, что записано до \(formatter.string(from: moment))?", "Delete everything recorded before \(formatter.string(from: moment))?")
         case .all: return L.tr("Удалить всю историю активности?", "Delete the whole activity history?")
         }
     }

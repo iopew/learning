@@ -24,6 +24,11 @@ final class AppServices {
     let notifier: Notifier
     let insights: InsightsModel
     let stability: StabilityMonitor
+    let network: NetworkMonitor
+    /// For writing and for the reports of the network history.
+    let networkStore: NetworkStore
+    /// A reader connection for database tools (size, download, compact).
+    let database: ActivityStore
     /// The day boundary in use (settings.dayStartHour as it was at launch).
     let days: DayCalendar
     let ui = UIState()
@@ -40,10 +45,11 @@ final class AppServices {
         self.days = days
 
         typealias Stores = (recorder: ActivityStore, reader: ActivityStore, systemRecorder: SystemStore,
-                            systemReader: SystemStore)
+                            systemReader: SystemStore, network: NetworkStore)
         func open(_ url: URL) throws -> Stores {
             (try ActivityStore(path: url.path, days: days), try ActivityStore(path: url.path, days: days),
-             try SystemStore(path: url.path, days: days), try SystemStore(path: url.path, days: days))
+             try SystemStore(path: url.path, days: days), try SystemStore(path: url.path, days: days),
+             try NetworkStore(path: url.path, days: days))
         }
 
         // Several connections to one file: writers (tracker on the main thread, system sampler in the background)
@@ -63,7 +69,7 @@ final class AppServices {
         let appliedKey = "dayStartHourApplied"
         if UserDefaults.standard.integer(forKey: appliedKey) != days.startHour {
             do {
-                let moved = try stores.recorder.rekeyDays() + stores.systemRecorder.rekeyDays()
+                let moved = try stores.recorder.rekeyDays() + stores.systemRecorder.rekeyDays() + stores.network.rekeyDays()
                 UserDefaults.standard.set(days.startHour, forKey: appliedKey)
                 NSLog("ActivityTracker: day boundary \(days.startHour):00, \(moved) rows moved")
             } catch {
@@ -74,13 +80,16 @@ final class AppServices {
         startupError = problem
 
         tracker = Tracker(store: stores.recorder, settings: settings)
-        menuStats = StatsModel(store: stores.reader, systemStore: stores.systemReader)
-        windowStats = StatsModel(store: stores.reader, systemStore: stores.systemReader)
+        networkStore = stores.network
+        database = stores.reader
+        menuStats = StatsModel(store: stores.reader, systemStore: stores.systemReader, networkStore: stores.network)
+        windowStats = StatsModel(store: stores.reader, systemStore: stores.systemReader, networkStore: stores.network)
         updater = Updater(settings: settings)
         sampler = SystemSampler(store: stores.systemRecorder)
         insights = InsightsModel(store: stores.reader)
         notifier = Notifier(store: stores.reader, systemStore: stores.systemReader, settings: settings)
         stability = StabilityMonitor(path: url.path, days: days)
+        network = NetworkMonitor(store: stores.network)
     }
 }
 
@@ -150,6 +159,7 @@ struct ActivityTrackerApp: App {
         }
         services.notifier.start()
         services.stability.start()
+        services.network.start()
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
         ) { _ in

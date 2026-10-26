@@ -62,6 +62,9 @@ struct SwitchesCard: View {
 // MARK: - Rhythm
 
 struct RhythmPane: View {
+    /// The day boundary setting (hidden for a saved database).
+    var showsBoundary = true
+
     @EnvironmentObject private var insights: InsightsModel
 
     var body: some View {
@@ -88,10 +91,20 @@ struct RhythmPane: View {
                 } else {
                     ProgressView().frame(maxWidth: .infinity)
                 }
-                DayBoundaryNote()
+                if showsBoundary { DayBoundaryNote() }
                 Divider()
-                Text(L.tr("Год по дням", "The year day by day")).font(.title3.weight(.semibold))
-                YearCalendar(stats: insights.year, days: insights.days)
+                HStack {
+                    Text(L.tr("Год по дням", "The year day by day")).font(.title3.weight(.semibold))
+                    Spacer()
+                    let thisYear = insights.days.calendar.component(.year, from: insights.today)
+                    Button { insights.calendarYear -= 1 } label: { Image(systemName: "chevron.left") }
+                        .disabled(insights.calendarYear <= (insights.firstYear ?? thisYear))
+                    Text(String(insights.calendarYear)).font(.headline).monospacedDigit().frame(width: 50)
+                    Button { insights.calendarYear += 1 } label: { Image(systemName: "chevron.right") }
+                        .disabled(insights.calendarYear >= thisYear)
+                }
+                .buttonStyle(.borderless)
+                YearCalendar(stats: insights.year, days: insights.days, year: insights.calendarYear, today: insights.today)
             }
             .frame(maxWidth: 860, alignment: .leading)
             .padding(24)
@@ -193,10 +206,12 @@ struct DayBoundaryNote: View {
     }
 }
 
-/// GitHub-style calendar: 53 columns (weeks) × 7 rows (Monday…Sunday), darker = more time at the computer.
+/// GitHub-style calendar of one calendar year: columns are weeks, rows Monday…Sunday, darker = more time.
 struct YearCalendar: View {
     let stats: [DayStat]
     let days: DayCalendar
+    let year: Int
+    let today: Date
 
     @State private var hovered: Date?
     private let cell: CGFloat = 13
@@ -206,14 +221,18 @@ struct YearCalendar: View {
     private static let levels: [TimeInterval] = [1, 3600, 3 * 3600, 5 * 3600, 8 * 3600]
 
     var body: some View {
-        let today = days.startOfDay(Date())
-        let firstWeek = days.addingDays(-52 * 7, to: days.startOfWeek(today))
+        let yearStart = days.date(fromKey: String(format: "%04d-01-01", year)) ?? today
+        let yearEnd = days.date(fromKey: String(format: "%04d-12-31", year)) ?? today
+        let firstWeek = days.startOfWeek(yearStart)
+        let weeks = days.dayCount(from: firstWeek, to: yearEnd) / 7 + 1
         let byDay = Dictionary(stats.map { (days.key($0.day), $0.seconds) }, uniquingKeysWith: +)
-        let total = stats.filter { $0.day >= days.addingDays(-364, to: today) }.reduce(0) { $0 + $1.seconds }
+        let total = stats.reduce(0) { $0 + $1.seconds }
+        let active = stats.filter { $0.seconds > 0 }.count
+        let visible: (Date) -> Bool = { day in day >= yearStart && day <= yearEnd && day <= today }
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(L.tr("За год: \(Format.duration(total)), активных дней: \(stats.filter { $0.seconds > 0 }.count)",
-                          "This year: \(Format.duration(total)), active days: \(stats.filter { $0.seconds > 0 }.count)"))
+                Text(L.tr("За \(String(year)) год: \(Format.duration(total)), активных дней: \(active)",
+                          "\(String(year)): \(Format.duration(total)), active days: \(active)"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -226,10 +245,10 @@ struct YearCalendar: View {
                     context.draw(Text(weekdays[index]).font(.system(size: 9)).foregroundColor(.secondary),
                                  at: CGPoint(x: 0, y: CGFloat(row) * (cell + gap) + cell / 2), anchor: .leading)
                 }
-                for week in 0..<53 {
+                for week in 0..<weeks {
                     for weekday in 0..<7 {
                         let day = days.addingDays(week * 7 + weekday, to: firstWeek)
-                        guard day <= today else { continue }
+                        guard visible(day) else { continue }
                         let rect = CGRect(x: labelWidth + CGFloat(week) * (cell + gap),
                                           y: CGFloat(weekday) * (cell + gap), width: cell, height: cell)
                         let seconds = byDay[days.key(day)] ?? 0
@@ -238,15 +257,15 @@ struct YearCalendar: View {
                     }
                 }
             }
-            .frame(width: labelWidth + 53 * (cell + gap), height: 7 * (cell + gap))
+            .frame(width: labelWidth + CGFloat(weeks) * (cell + gap), height: 7 * (cell + gap))
             .onContinuousHover { phase in
                 switch phase {
                 case .active(let point):
                     let week = Int((point.x - labelWidth) / (cell + gap))
                     let weekday = Int(point.y / (cell + gap))
-                    if point.x >= labelWidth, (0..<53).contains(week), (0..<7).contains(weekday) {
+                    if point.x >= labelWidth, (0..<weeks).contains(week), (0..<7).contains(weekday) {
                         let day = days.addingDays(week * 7 + weekday, to: firstWeek)
-                        hovered = day <= today ? day : nil
+                        hovered = visible(day) ? day : nil
                     } else {
                         hovered = nil
                     }

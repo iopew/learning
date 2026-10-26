@@ -232,11 +232,12 @@ public final class StabilityStore {
         }
     }
 
-    public func eraseAll() throws {
+    /// Events before `moment` (clean-up of old history).
+    public func erase(before moment: Date) throws {
         lock.lock()
         defer { lock.unlock() }
 
-        try db.run("DELETE FROM stability_events")
+        try db.run("DELETE FROM stability_events WHERE at < ?", [.double(moment.timeIntervalSince1970)])
     }
 }
 

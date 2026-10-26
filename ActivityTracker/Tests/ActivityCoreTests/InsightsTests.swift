@@ -389,3 +389,134 @@ final class InsightsTests: XCTestCase {
         XCTAssertEqual(report.recent.count, 4)   // boots are not listed
     }
 }
+
+final class NetworkAndDatabaseTests: XCTestCase {
+    private var calendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Tashkent")!
+        calendar.firstWeekday = 2
+        return calendar
+    }()
+    private var paths: [String] = []
+
+    override func setUp() {
+        L.current = .ru
+    }
+
+    override func tearDown() {
+        for path in paths {
+            for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: path + suffix) }
+        }
+        paths = []
+    }
+
+    private func tempPath() -> String {
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).sqlite").path
+        paths.append(path)
+        return path
+    }
+
+    private func date(_ text: String) -> Date {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter.date(from: text)!
+    }
+
+    func testPingOutput() {
+        let text = """
+        PING 1.1.1.1 (1.1.1.1): 56 data bytes
+
+        --- 1.1.1.1 ping statistics ---
+        3 packets transmitted, 2 packets received, 33.3% packet loss
+        round-trip min/avg/max/stddev = 10.123/12.500/14.877/1.940 ms
+        """
+        let result = PingOutput.parse(text)
+        XCTAssertEqual(result.average, 12.5)
+        XCTAssertEqual(result.loss!, 0.333, accuracy: 0.0001)
+        let dead = PingOutput.parse("3 packets transmitted, 0 packets received, 100.0% packet loss\n")
+        XCTAssertNil(dead.average)
+        XCTAssertEqual(dead.loss, 1)
+    }
+
+    func testNetworkReportPerNetwork() throws {
+        let days = DayCalendar(calendar: calendar)
+        let store = try NetworkStore(path: tempPath(), days: days)
+        let home = NetworkInfo(key: "wifi:Home", name: "Home", kind: .wifi)
+        let phone = NetworkInfo(key: "wifi:iPhone", name: "iPhone", kind: .hotspot)
+        var minute = date("2026-10-21 10:00:00")
+        for index in 0..<4 {
+            var sample = NetworkSample(at: minute, interval: 60, network: home)
+            sample.rx = 1_000_000
+            sample.tx = 100_000
+            sample.peakRx = Double(index) * 1000
+            sample.busyRxBytes = 500_000
+            sample.busyRxSeconds = 10
+            sample.pingInternet = 20
+            sample.pingRouter = 2
+            sample.loss = 0
+            sample.online = index != 2   // one outage minute
+            sample.linkRate = 866
+            sample.rssi = -50
+            try store.record(sample)
+            minute = minute.addingTimeInterval(60)
+        }
+        var hotspot = NetworkSample(at: date("2026-10-21 12:00:00"), interval: 60, network: phone)
+        hotspot.rx = 5_000_000
+        try store.record(hotspot)
+
+        let report = try store.report(range: .day, anchor: date("2026-10-21 12:00:00"))
+        XCTAssertEqual(report.rx, 9_000_000)
+        XCTAssertEqual(report.tx, 400_000)
+        XCTAssertEqual(report.networks.map(\.name), ["iPhone", "Home"])
+        let homeUsage = report.networks[1]
+        XCTAssertEqual(homeUsage.kind, .wifi)
+        XCTAssertEqual(homeUsage.connected, 240)
+        XCTAssertEqual(homeUsage.averageDown, 50_000)
+        XCTAssertNil(homeUsage.averageUp)
+        XCTAssertEqual(homeUsage.peakDown, 3000)
+        XCTAssertEqual(homeUsage.pingInternet, 20)
+        XCTAssertEqual(homeUsage.outages, 1)
+        XCTAssertEqual(homeUsage.outageTime, 60)
+        XCTAssertNil(report.networks[0].pingInternet)
+        XCTAssertEqual(report.unit, .hour)
+        XCTAssertEqual(report.buckets.count, 2)
+
+        try store.rename("wifi:Home", to: "Дом")
+        XCTAssertEqual(try store.report(range: .day, anchor: date("2026-10-21 12:00:00")).networks[1].name, "Дом")
+        // A new sample keeps the user's name.
+        try store.record(NetworkSample(at: date("2026-10-21 13:00:00"), interval: 60, network: home))
+        XCTAssertTrue(try store.report(range: .day, anchor: date("2026-10-21 12:00:00")).networks.contains { $0.name == "Дом" })
+
+        try store.erase(.before(date("2026-10-21 11:00:00")))
+        XCTAssertEqual(try store.report(range: .day, anchor: date("2026-10-21 12:00:00")).rx, 5_000_000)
+    }
+
+    func testEraseBeforeBackupAndSummary() throws {
+        let days = DayCalendar(calendar: calendar)
+        let path = tempPath()
+        let store = try ActivityStore(path: path, days: days)
+        let sample = Sample(bundleID: "a", appName: "A")
+        try store.record(sample, at: date("2026-09-01 10:00:00"), interval: 5)
+        try store.endStreak(at: date("2026-09-01 10:00:05"))
+        try store.record(sample, at: date("2026-10-21 10:00:00"), interval: 5)
+
+        let summary = try store.historySummary()
+        XCTAssertEqual(summary.days, 2)
+        XCTAssertEqual(summary.first, date("2026-09-01 00:00:00"))
+        XCTAssertEqual(summary.last, date("2026-10-21 00:00:00"))
+
+        let copy = tempPath()
+        try store.backup(to: copy)
+        let restored = try ActivityStore(path: copy, days: days)
+        XCTAssertEqual(try restored.historySummary().days, 2)
+
+        try store.erase(.before(date("2026-10-01 00:00:00")))
+        XCTAssertEqual(try store.historySummary().days, 1)
+        try store.compact()
+        XCTAssertEqual(try restored.historySummary().days, 2)   // the copy is independent
+        XCTAssertEqual(Format.bitrate(1_250_000), "10,0 Мбит/с")
+        XCTAssertEqual(Format.milliseconds(23.4), "23 мс")
+    }
+}

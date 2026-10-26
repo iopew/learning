@@ -39,6 +39,25 @@ public enum Format {
         return (L.current == .en ? number : number.replacingOccurrences(of: ".", with: ",")) + " " + units[unit]
     }
 
+    /// Bytes per second → "12,4 Мбит/с" / "12.4 Mbit/s" (network speeds are quoted in bits).
+    public static func bitrate(_ bytesPerSecond: Double) -> String {
+        let units = L.current == .en ? ["bit/s", "Kbit/s", "Mbit/s", "Gbit/s"] : ["бит/с", "Кбит/с", "Мбит/с", "Гбит/с"]
+        var value = max(bytesPerSecond, 0) * 8
+        var unit = 0
+        while value >= 1000 && unit < units.count - 1 {
+            value /= 1000
+            unit += 1
+        }
+        let number = value >= 100 || unit == 0 ? String(format: "%.0f", value) : String(format: "%.1f", value)
+        return (L.current == .en ? number : number.replacingOccurrences(of: ".", with: ",")) + " " + units[unit]
+    }
+
+    /// 23.4 → "23 мс" / "23 ms"; below 10 with a decimal.
+    public static func milliseconds(_ value: Double) -> String {
+        let number = value < 10 ? String(format: "%.1f", value) : String(format: "%.0f", value)
+        return (L.current == .en ? number : number.replacingOccurrences(of: ".", with: ",")) + (L.current == .en ? " ms" : " мс")
+    }
+
     /// 0.4321 → "43%"; tiny non-zero shares show as "<1%".
     public static func percent(_ part: TimeInterval, of whole: TimeInterval) -> String {
         guard whole > 0 else { return "0%" }
