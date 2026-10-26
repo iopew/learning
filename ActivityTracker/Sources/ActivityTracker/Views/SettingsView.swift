@@ -163,7 +163,7 @@ struct SettingsView: View {
 
                 Divider()
 
-                PhoneSection(server: AppServices.shared.phone)
+                PhoneSection(server: AppServices.shared.phone, installer: AppServices.shared.phoneInstaller)
 
                 Divider()
 

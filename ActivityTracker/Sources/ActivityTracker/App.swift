@@ -36,6 +36,8 @@ final class AppServices {
     let machine: MachineMonitor
     /// Answers the paired iPhone.
     let phone: PhoneServer
+    /// Builds and installs the iPhone app with the Xcode on this Mac.
+    let phoneInstaller = PhoneInstaller()
     /// The day boundary in use (settings.dayStartHour as it was at launch).
     let days: DayCalendar
     let ui = UIState()
@@ -209,6 +211,7 @@ struct ActivityTrackerApp: App {
         services.network.start()
         services.machine.start()
         services.phone.start()
+        services.phoneInstaller.pairingCode = { [weak phone = services.phone] in phone?.codeForCable() }
         ArchiveSession.removeLeftovers()
         scheduleRollUp()
         NotificationCenter.default.addObserver(

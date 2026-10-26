@@ -6,11 +6,14 @@ import ActivityCore
 /// Settings → iPhone: pair the iPhone app with a QR code, send a snapshot through AirDrop, unpair.
 struct PhoneSection: View {
     @ObservedObject var server: PhoneServer
+    @ObservedObject var installer: PhoneInstaller
     @State private var showingCode = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("iPhone").font(.headline)
+            installSection
+            Divider().padding(.vertical, 2)
             if let pairing = server.pairing {
                 HStack {
                     Button(showingCode ? L.tr("Скрыть QR-код", "Hide the QR code") : L.tr("Показать QR-код", "Show the QR code")) {
@@ -39,6 +42,63 @@ struct PhoneSection: View {
             }
             Text(L.tr("Приложение ActivityTracker на iPhone забирает готовые отчёты прямо с этого Mac, когда они в одной сети: дома, через режим модема iPhone или на работе. Без облака: данные зашифрованы ключом из QR-кода, и без него никто в сети их не получит. Заголовки окон и адреса страниц на телефон не передаются. Если в сети устройства не видят друг друга — отправь снимок через AirDrop.",
                       "The ActivityTracker iPhone app fetches ready reports straight from this Mac when both are on one network: at home, through the iPhone's hotspot or at work. No cloud: the data is encrypted with the key in the QR code, and nobody on the network gets it without that key. Window titles and page addresses are not sent. If devices can't see each other on a network, send a snapshot via AirDrop."))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Step 1: put the app on the iPhone (and every 7 days again, to renew the free signature).
+    private var installSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Button(installer.lastInstall == nil ? L.tr("Установить на iPhone", "Install on iPhone")
+                                                    : L.tr("Обновить приложение на iPhone", "Update the app on iPhone")) {
+                    installer.install()
+                }
+                .disabled(installer.isWorking)
+                if installer.isWorking { ProgressView().controlSize(.small) }
+                Button(L.tr("Журнал", "Log")) { NSWorkspace.shared.open(PhoneInstaller.logURL) }
+                    .buttonStyle(.link)
+                    .opacity(FileManager.default.fileExists(atPath: PhoneInstaller.logURL.path) ? 1 : 0)
+            }
+            switch installer.phase {
+            case .idle:
+                EmptyView()
+            case .working(let text):
+                Text(text).font(.caption).foregroundStyle(.secondary)
+            case .done(let text):
+                Text(text).font(.caption).foregroundStyle(.green).fixedSize(horizontal: false, vertical: true)
+            case .failed(let text):
+                Text(text).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+            }
+            switch installer.fix {
+            case .installXcode:
+                Button(L.tr("Открыть Xcode в App Store", "Open Xcode in the App Store")) {
+                    NSWorkspace.shared.open(URL(string: "macappstore://apps.apple.com/app/id497799835")!)
+                }
+            case .signIn:
+                Button(L.tr("Открыть Xcode", "Open Xcode")) {
+                    if let xcode = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.dt.Xcode") {
+                        NSWorkspace.shared.openApplication(at: xcode, configuration: NSWorkspace.OpenConfiguration())
+                    }
+                }
+            case .none:
+                EmptyView()
+            }
+            if let last = installer.lastInstall, !installer.isWorking {
+                let expires = last.addingTimeInterval(7 * 86_400)
+                Text(expires > Date()
+                     ? L.tr("Установлено \(Format.relative(last)). С бесплатным Apple ID подпись действует до \(expires.formatted(date: .abbreviated, time: .omitted)) — потом нажми кнопку снова.",
+                            "Installed \(Format.relative(last)). With a free Apple ID the signature lasts until \(expires.formatted(date: .abbreviated, time: .omitted)) — then press the button again.")
+                     : L.tr("Подпись истекла — подключи iPhone и нажми «Обновить приложение на iPhone».",
+                            "The signature has expired — connect the iPhone and press “Update the app on iPhone”."))
+                    .font(.caption)
+                    .foregroundStyle(expires > Date() ? Color.secondary : Color.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text(L.tr("Нужны: Xcode (App Store), вход в Xcode своим Apple ID (Xcode → Settings → Accounts, один раз), iPhone на кабеле с включённым режимом разработчика. Код скачивается с GitHub, собирается и подписывается на этом Mac; Xcode открывать не нужно. macOS может спросить пароль от связки ключей для codesign — нажми «Всегда разрешать».",
+                      "Needed: Xcode (App Store), your Apple ID signed in to Xcode (Xcode → Settings → Accounts, once), the iPhone on a cable with Developer Mode on. The source is downloaded from GitHub, built and signed on this Mac; Xcode doesn't need to be opened. macOS may ask for the keychain password for codesign — choose “Always Allow”."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

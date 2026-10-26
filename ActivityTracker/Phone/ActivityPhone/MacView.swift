@@ -35,8 +35,8 @@ struct MacView: View {
                   systemImage: "laptopcomputer.and.iphone")
         } description: {
             if model.pairing == nil {
-                Text(L.tr("На Mac: ActivityTracker → Настройки → iPhone → «Связать с iPhone». Здесь: вкладка «Настройки» → «Связать с Mac».",
-                          "On the Mac: ActivityTracker → Settings → iPhone → “Pair with an iPhone”. Here: the Settings tab → “Pair with Mac”."))
+                Text(L.tr("Подключи iPhone кабелем и нажми на Mac: ActivityTracker → Настройки → iPhone → «Обновить приложение на iPhone» — связь настроится сама. Или: на Mac «Связать с iPhone», здесь «Настройки» → «Связать с Mac» и QR-код.",
+                          "Connect the iPhone with a cable and press on the Mac: ActivityTracker → Settings → iPhone → “Update the app on iPhone” — pairing is set up by itself. Or: “Pair with an iPhone” on the Mac, then Settings → “Pair with Mac” here and the QR code."))
             } else {
                 Text(model.lastError ?? L.tr("Mac и iPhone должны быть в одной сети: Wi-Fi или режим модема.", "The Mac and the iPhone must be on one network: Wi-Fi or the hotspot."))
             }

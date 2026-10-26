@@ -43,8 +43,8 @@ struct SettingsTab: View {
                     Text(L.tr("Статистика приходит прямо с Mac, без облака, зашифрованной ключом из QR-кода. На iPhone хранится только последний снимок отчётов (без заголовков окон и адресов страниц) и замеры батареи и трафика этого iPhone.",
                               "Statistics come straight from the Mac, without a cloud, encrypted with the key from the QR code. The iPhone keeps only the latest report snapshot (no window titles or page addresses) and this iPhone's battery and traffic readings."))
                         .font(.footnote)
-                    Text(L.tr("Приложение подписано бесплатным Apple ID: раз в 7 дней его нужно заново запустить из Xcode на Mac (данные сохраняются).",
-                              "The app is signed with a free Apple ID: every 7 days run it again from Xcode on the Mac (data is kept)."))
+                    Text(L.tr("С бесплатным Apple ID подпись действует 7 дней: подключи iPhone кабелем к Mac и нажми там ActivityTracker → Настройки → iPhone → «Обновить приложение на iPhone» (данные сохраняются).",
+                              "With a free Apple ID the signature lasts 7 days: connect the iPhone to the Mac with a cable and press ActivityTracker → Settings → iPhone → “Update the app on iPhone” there (data is kept)."))
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

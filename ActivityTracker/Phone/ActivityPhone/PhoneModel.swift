@@ -48,6 +48,17 @@ final class PhoneModel: ObservableObject {
         return true
     }
 
+    /// "Install on iPhone" on the Mac leaves the pairing code in Documents/pairing.atpair: take it and delete it.
+    func takePairingFromCable() {
+        let file = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("pairing.atpair")
+        guard let data = try? Data(contentsOf: file) else { return }
+        try? FileManager.default.removeItem(at: file)
+        if let code = String(data: data, encoding: .utf8), PhoneLink.decodePairing(code) != pairing {
+            _ = pair(code: code)
+        }
+    }
+
     func unpair() {
         Keychain.delete()
         pairing = nil
@@ -61,6 +72,7 @@ final class PhoneModel: ObservableObject {
     // MARK: - Getting the Mac's statistics
 
     func sync() async {
+        takePairingFromCable()
         recordMeter()
         guard let pairing, !syncing else { return }
         syncing = true

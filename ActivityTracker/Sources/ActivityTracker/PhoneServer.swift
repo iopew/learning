@@ -51,6 +51,12 @@ final class PhoneServer: ObservableObject {
         }
     }
 
+    /// The QR code text, pairing first when there is no pairing yet (main thread).
+    func codeForCable() -> String? {
+        if pairing == nil { pair() }
+        return pairing.map(PhoneLink.encode)
+    }
+
     func unpair() {
         if let url = Self.pairingURL { try? FileManager.default.removeItem(at: url) }
         pairing = nil
