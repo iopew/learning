@@ -16,7 +16,10 @@ let package = Package(
         // The macOS menu bar app: collectors (AppKit, Accessibility, AppleScript) and SwiftUI views.
         .executableTarget(
             name: "ActivityTracker",
-            dependencies: ["ActivityCore"]
+            dependencies: ["ActivityCore"],
+            // FoundationModels (on-device AI, macOS 26+) is linked weakly so the app still starts on macOS 13–15.
+            swiftSettings: [.unsafeFlags(["-Xfrontend", "-disable-autolink-framework", "-Xfrontend", "FoundationModels"])],
+            linkerSettings: [.unsafeFlags(["-Xlinker", "-weak_framework", "-Xlinker", "FoundationModels"])]
         ),
         .testTarget(
             name: "ActivityCoreTests",

@@ -3,22 +3,59 @@ import SwiftUI
 import UniformTypeIdentifiers
 import ActivityCore
 
-/// "Сводка дня": the day in a few sentences (day view).
+/// "Сводка дня": the day in a few sentences (day view), optionally retold by Apple's on-device model.
 struct DaySummaryCard: View {
     let lines: [String]
 
+    @State private var story: String?
+    @State private var working = false
+    @State private var failed = false
+
     var body: some View {
         if !lines.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(L.tr("День словами", "The day in words")).font(.caption).foregroundStyle(.secondary)
-                ForEach(lines, id: \.self) { line in
-                    Text(line).font(.callout).fixedSize(horizontal: false, vertical: true)
+                if let story {
+                    Text(story).font(.callout).fixedSize(horizontal: false, vertical: true)
+                    Label(L.tr("пересказ нейросетью Apple на этом Mac", "retold by Apple's on-device model"), systemImage: "sparkles")
+                        .font(.caption2).foregroundStyle(.secondary)
+                } else {
+                    ForEach(lines, id: \.self) { line in
+                        Text(line).font(.callout).fixedSize(horizontal: false, vertical: true)
+                    }
                 }
+                HStack(spacing: 10) {
+                    if AIWriter.isAvailable {
+                        Button(working ? L.tr("Пишу…", "Writing…")
+                               : story == nil ? L.tr("Пересказать нейросетью", "Retell with on-device AI")
+                               : L.tr("Пересказать заново", "Retell again")) { retell() }
+                            .disabled(working)
+                        if story != nil {
+                            Button(L.tr("Показать факты", "Show the facts")) { story = nil }
+                        }
+                    }
+                    if failed {
+                        Text(L.tr("Нейросеть не ответила, показаны факты.", "The model didn't answer; showing the facts."))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.borderless)
+                .font(.caption)
             }
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
             .textSelection(.enabled)
+        }
+    }
+
+    private func retell() {
+        working = true
+        failed = false
+        AIWriter.story(from: lines) { text in
+            working = false
+            story = text
+            failed = text == nil
         }
     }
 }

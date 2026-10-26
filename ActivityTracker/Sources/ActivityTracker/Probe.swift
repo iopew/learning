@@ -33,6 +33,7 @@ enum Probe {
         let apps = energy.collect().sorted { $0.joules > $1.joules }.prefix(3)
         print("energy (1 s):       \(apps.map { "\($0.appName) \(String(format: "%.3f", $0.joules)) J" })")
         print("display kept awake: \(Idle.isDisplaySleepPrevented())")
+        print("on-device AI:       \(AIWriter.isAvailable ? "available" : "not available")")
 
         let path = FileManager.default.temporaryDirectory
             .appendingPathComponent("activity-probe-\(UUID().uuidString).sqlite").path
