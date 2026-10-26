@@ -225,7 +225,7 @@ final class StabilityMonitor: ObservableObject {
         let event = StabilityEvent(source: "shutdown-\(bootKey)", at: boot, kind: .shutdown,
                                    name: StabilityParser.describeShutdown(code),
                                    detail: L.tr("код \(code)", "code \(code)"))
-        try? store.add([event])
+        _ = try? store.add([event])
         reload()
     }
 }

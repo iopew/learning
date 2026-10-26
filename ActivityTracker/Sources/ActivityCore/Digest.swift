@@ -37,6 +37,11 @@ public enum DigestSchedule {
 public struct DigestMessage: Equatable {
     public var title: String
     public var body: String
+
+    public init(title: String, body: String) {
+        self.title = title
+        self.body = body
+    }
 }
 
 public enum Digest {
