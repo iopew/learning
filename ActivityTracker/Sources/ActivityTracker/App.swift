@@ -34,10 +34,6 @@ final class AppServices {
     /// Sleep, sleep blockers, startup items, folder sizes, SSD writes.
     let machineStore: MachineStore
     let machine: MachineMonitor
-    /// Answers the paired iPhone.
-    let phone: PhoneServer
-    /// Builds and installs the iPhone app with the Xcode on this Mac.
-    let phoneInstaller = PhoneInstaller()
     /// The day boundary in use (settings.dayStartHour as it was at launch).
     let days: DayCalendar
     let ui = UIState()
@@ -128,11 +124,6 @@ final class AppServices {
         notifier = Notifier(store: stores.reader, systemStore: stores.systemReader, settings: settings)
         stability = StabilityMonitor(path: url.path, days: days)
         network = NetworkMonitor(store: stores.network)
-        let build = Int(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0
-        phone = PhoneServer { [reader = stores.reader, network = stores.network, system = stores.systemReader] in
-            try PhoneSnapshot.make(activity: reader, network: network, system: system, days: days, now: Date(),
-                                   macName: PhoneServer.computerName, build: build)
-        }
     }
 }
 
@@ -210,14 +201,26 @@ struct ActivityTrackerApp: App {
         services.stability.start()
         services.network.start()
         services.machine.start()
-        services.phone.start()
-        services.phoneInstaller.pairingCode = { [weak phone = services.phone] in phone?.codeForCable() }
+        removePhoneLeftovers()
         ArchiveSession.removeLeftovers()
         scheduleRollUp()
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
         ) { _ in
             services.tracker.stop()
+        }
+    }
+
+    /// Builds 24–28 had an iPhone companion (removed in build 29): its pairing key and the downloaded iPhone source
+    /// with build products are deleted (nothing to do once they are gone).
+    private static func removePhoneLeftovers() {
+        DispatchQueue.global(qos: .background).async {
+            guard let folder = try? ActivityStore.defaultURL().deletingLastPathComponent() else { return }
+            for name in ["phone-pairing.json", "iphone-src"] {
+                try? FileManager.default.removeItem(at: folder.appendingPathComponent(name))
+            }
+            UserDefaults.standard.removeObject(forKey: "phoneLastInstall")
+            UserDefaults.standard.removeObject(forKey: "phoneTeamID")
         }
     }
 

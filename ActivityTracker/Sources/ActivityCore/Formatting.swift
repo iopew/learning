@@ -75,13 +75,4 @@ public enum Format {
         if value > 0 && value < 1 { return "<1%" }
         return "\(Int(value.rounded()))%"
     }
-
-    /// "только что", "5 мин назад", "3 ч назад", "2 дн назад" / "just now", "5 min ago"…
-    public static func relative(_ date: Date, now: Date = Date()) -> String {
-        let seconds = max(0, now.timeIntervalSince(date))
-        if seconds < 60 { return L.tr("только что", "just now") }
-        if seconds < 3600 { return L.tr("\(Int(seconds / 60)) мин назад", "\(Int(seconds / 60)) min ago") }
-        if seconds < 86_400 { return L.tr("\(Int(seconds / 3600)) ч назад", "\(Int(seconds / 3600)) h ago") }
-        return L.tr("\(Int(seconds / 86_400)) дн назад", "\(Int(seconds / 86_400)) d ago")
-    }
 }

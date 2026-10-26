@@ -7,7 +7,6 @@ on:
       - "!ActivityTracker/docs/**"
       - "!ActivityTracker/WIP/**"
       - "!ActivityTracker/**/*.md"
-      - "!ActivityTracker/Phone/**"
       - ".github/workflows/activity-tracker.yml"
   workflow_dispatch:
 
