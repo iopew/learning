@@ -521,12 +521,19 @@ struct StabilityPane: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 if let report = stability.report {
-                    StabilitySummary(report: report, bootTime: stability.bootTime)
+                    let uptime = stability.bootTime.map { Date().timeIntervalSince($0) }
+                    StabilityVerdictCard(verdict: report.verdict(uptime: uptime))
+                    StabilitySummary(report: report, uptime: uptime)
                     StabilityWeeksChart(weeks: report.weeks)
                     HStack(alignment: .top, spacing: 24) {
-                        StabilityApps(apps: report.apps)
-                        StabilityVersions(versions: report.versions)
+                        StabilityApps(title: L.tr("Твои программы (30 дней)", "Your programs (30 days)"),
+                                      empty: L.tr("Ни одна не падала", "None crashed"),
+                                      apps: report.apps.filter { !$0.isSystem })
+                        StabilityApps(title: L.tr("Службы macOS (30 дней)", "macOS services (30 days)"),
+                                      empty: L.tr("Сбоев не было", "No crashes"),
+                                      apps: report.apps.filter(\.isSystem))
                     }
+                    StabilityVersions(versions: report.versions)
                     StabilityList(events: report.recent)
                 } else if let error = stability.error {
                     Text(error).foregroundStyle(.red)
@@ -553,23 +560,72 @@ struct StabilityPane: View {
     }
 }
 
-private struct StabilitySummary: View {
-    let report: StabilityReport
-    let bootTime: Date?
+/// "С Mac всё в порядке" / what to do.
+private struct StabilityVerdictCard: View {
+    let verdict: StabilityVerdict
 
     var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            metric(L.tr("Сбоев за 7 дней", "Crashes, 7 days"), "\(report.crashes7)")
-            metric(L.tr("Зависаний за 7 дней", "Hangs, 7 days"), "\(report.hangs7)")
-            metric(L.tr("Kernel panic за 30 дней", "Kernel panics, 30 days"), "\(report.panics30)")
-            metric(L.tr("Без перезагрузки", "Uptime"), bootTime.map { Format.duration(Date().timeIntervalSince($0)) } ?? "—")
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: symbol)
+                .font(.title2)
+                .foregroundStyle(color)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(verdict.title).font(.title3.weight(.semibold))
+                ForEach(verdict.details, id: \.self) { line in
+                    Text(line).font(.callout).fixedSize(horizontal: false, vertical: true)
+                }
+                if verdict.suggestRestart {
+                    Label(L.tr("Пора перезагрузить Mac", "Time to restart the Mac"), systemImage: "arrow.clockwise")
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(.orange)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var symbol: String {
+        switch verdict.level {
+        case .ok: return "checkmark.seal.fill"
+        case .attention: return "exclamationmark.circle.fill"
+        case .problem: return "exclamationmark.triangle.fill"
         }
     }
 
-    private func metric(_ title: String, _ value: String) -> some View {
+    private var color: Color {
+        switch verdict.level {
+        case .ok: return .green
+        case .attention: return .orange
+        case .problem: return .red
+        }
+    }
+}
+
+private struct StabilitySummary: View {
+    let report: StabilityReport
+    let uptime: TimeInterval?
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            metric(L.tr("Сбои программ, 7 дней", "Program crashes, 7 days"), "\(report.crashes7 - report.serviceCrashes7)",
+                   L.tr("то, что ты запускаешь сам", "what you run yourself"))
+            metric(L.tr("Сбои служб macOS, 7 дней", "macOS service crashes, 7 days"), "\(report.serviceCrashes7)",
+                   L.tr("перезапускаются сами", "restart by themselves"))
+            metric(L.tr("Зависания, 7 дней", "Hangs, 7 days"), "\(report.hangs7)",
+                   L.tr("программа не отвечала", "a program stopped responding"))
+            metric(L.tr("Kernel panic, 30 дней", "Kernel panics, 30 days"), "\(report.panics30)",
+                   L.tr("Mac перезагрузился сам", "the Mac restarted itself"))
+            metric(L.tr("Без перезагрузки", "Since restart"), uptime.map(Format.longDuration) ?? "—", nil)
+        }
+    }
+
+    private func metric(_ title: String, _ value: String, _ note: String?) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             Text(value).font(.title2.weight(.semibold)).monospacedDigit()
+            if let note { Text(note).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -583,42 +639,66 @@ private struct StabilityWeeksChart: View {
             Text(L.tr("По неделям", "By week")).font(.caption).foregroundStyle(.secondary)
             Chart {
                 ForEach(weeks) { week in
-                    BarMark(x: .value(L.tr("Неделя", "Week"), week.start, unit: .weekOfYear),
-                            y: .value(L.tr("Число", "Count"), week.crashes))
-                        .foregroundStyle(by: .value(L.tr("Тип", "Kind"), L.tr("Сбои", "Crashes")))
-                    BarMark(x: .value(L.tr("Неделя", "Week"), week.start, unit: .weekOfYear),
-                            y: .value(L.tr("Число", "Count"), week.hangs))
-                        .foregroundStyle(by: .value(L.tr("Тип", "Kind"), L.tr("Зависания", "Hangs")))
-                    BarMark(x: .value(L.tr("Неделя", "Week"), week.start, unit: .weekOfYear),
-                            y: .value(L.tr("Число", "Count"), week.other))
-                        .foregroundStyle(by: .value(L.tr("Тип", "Kind"), L.tr("Прочее", "Other")))
+                    bar(week, week.crashes, L.tr("Сбои программ", "Program crashes"))
+                    bar(week, week.serviceCrashes, L.tr("Сбои служб macOS", "macOS service crashes"))
+                    bar(week, week.hangs, L.tr("Зависания", "Hangs"))
+                    bar(week, week.other, L.tr("Нагрузка и предупреждения", "Load and warnings"))
                 }
             }
+            .chartForegroundStyleScale([
+                L.tr("Сбои программ", "Program crashes"): Color.red,
+                L.tr("Сбои служб macOS", "macOS service crashes"): Color.blue,
+                L.tr("Зависания", "Hangs"): Color.orange,
+                L.tr("Нагрузка и предупреждения", "Load and warnings"): Color.gray.opacity(0.6),
+            ])
             .frame(height: 160)
+            Text(L.tr("«Нагрузка и предупреждения» — не сбои: macOS записывает, что программа долго грузила процессор, много писала на диск или не хватало памяти.",
+                      "“Load and warnings” are not crashes: macOS notes that a program kept the CPU busy, wrote a lot to disk, or memory ran short."))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private func bar(_ week: StabilityReport.Week, _ count: Int, _ kind: String) -> some ChartContent {
+        BarMark(x: .value(L.tr("Неделя", "Week"), week.start, unit: .weekOfYear),
+                y: .value(L.tr("Число", "Count"), count))
+            .foregroundStyle(by: .value(L.tr("Тип", "Kind"), kind))
     }
 }
 
 private struct StabilityApps: View {
+    let title: String
+    let empty: String
     let apps: [StabilityReport.AppCount]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(L.tr("Чаще всего падали (30 дней)", "Crashed most (30 days)")).font(.headline)
+            Text(title).font(.headline)
             if apps.isEmpty {
-                Text(L.tr("Сбоев не было", "No crashes")).foregroundStyle(.secondary)
+                Text(empty).foregroundStyle(.secondary)
             }
-            ForEach(apps) { app in
-                HStack {
-                    Text(app.name).lineLimit(1)
-                    Spacer()
-                    Text(L.tr("\(app.crashes) сб. · \(app.hangs) зав.", "\(app.crashes) crashes · \(app.hangs) hangs"))
-                        .font(.caption)
-                        .monospacedDigit()
+            ForEach(apps.prefix(8)) { app in
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack {
+                        Text(app.name).lineLimit(1)
+                        Spacer()
+                        Text(counts(app)).font(.caption).monospacedDigit()
+                    }
+                    if let description = StabilityNames.describe(app.name) {
+                        Text(description).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func counts(_ app: StabilityReport.AppCount) -> String {
+        var parts: [String] = []
+        if app.crashes > 0 { parts.append(L.tr("сбоев: \(app.crashes)", "crashes: \(app.crashes)")) }
+        if app.hangs > 0 { parts.append(L.tr("зависаний: \(app.hangs)", "hangs: \(app.hangs)")) }
+        return parts.joined(separator: " · ")
     }
 }
 
@@ -631,6 +711,7 @@ private struct StabilityVersions: View {
             ForEach(versions) { event in
                 HStack {
                     Text(event.name).lineLimit(1)
+                    Text(event.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     Spacer()
                     Text(StabilityList.date(event.at)).font(.caption).foregroundStyle(.secondary)
                 }
@@ -661,13 +742,13 @@ private struct StabilityList: View {
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                             .frame(width: 100, alignment: .leading)
-                        Image(systemName: symbol(event.kind))
-                            .foregroundStyle(color(event.kind))
+                        Image(systemName: symbol(event))
+                            .foregroundStyle(color(event))
                             .frame(width: 16)
                         VStack(alignment: .leading, spacing: 1) {
-                            Text("\(title(event.kind)): \(event.name)").font(.callout).lineLimit(1)
-                            if !event.detail.isEmpty {
-                                Text(event.detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                            Text("\(title(event)): \(event.name)").font(.callout).lineLimit(1)
+                            ForEach(notes(event), id: \.self) { note in
+                                Text(note).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                             }
                         }
                         Spacer()
@@ -677,23 +758,41 @@ private struct StabilityList: View {
         }
     }
 
-    private func title(_ kind: StabilityEvent.Kind) -> String {
-        switch kind {
-        case .crash: return L.tr("Сбой", "Crash")
+    private func isService(_ event: StabilityEvent) -> Bool {
+        (event.kind == .crash || event.kind == .hang) && StabilityNames.isSystem(event.name)
+    }
+
+    private func notes(_ event: StabilityEvent) -> [String] {
+        var notes: [String] = []
+        if isService(event) {
+            let what = StabilityNames.describe(event.name).map { L.tr("служба macOS: \($0)", "macOS service: \($0)") }
+                ?? L.tr("фоновая служба macOS", "macOS background service")
+            notes.append(what + L.tr(", перезапускается сама", ", restarts by itself"))
+        }
+        if event.kind == .resource {
+            notes.append(L.tr("не сбой: macOS отметила большую нагрузку", "not a crash: macOS noted heavy use"))
+        }
+        if !event.detail.isEmpty { notes.append(event.detail) }
+        return notes
+    }
+
+    private func title(_ event: StabilityEvent) -> String {
+        switch event.kind {
+        case .crash: return isService(event) ? L.tr("Сбой службы", "Service crash") : L.tr("Сбой программы", "Program crash")
         case .hang: return L.tr("Зависание", "Hang")
         case .panic: return "Kernel panic"
-        case .resource: return L.tr("Нагрузка", "Resource use")
+        case .resource: return L.tr("Нагрузка", "Heavy use")
         case .memory: return L.tr("Нехватка памяти", "Low memory")
         case .shutdown: return L.tr("Прошлое выключение", "Last shutdown")
         case .boot: return L.tr("Включение", "Boot")
-        case .os: return L.tr("macOS", "macOS")
+        case .os: return "macOS"
         case .other: return L.tr("Отчёт", "Report")
         }
     }
 
-    private func symbol(_ kind: StabilityEvent.Kind) -> String {
-        switch kind {
-        case .crash: return "xmark.octagon"
+    private func symbol(_ event: StabilityEvent) -> String {
+        switch event.kind {
+        case .crash: return isService(event) ? "arrow.triangle.2.circlepath" : "xmark.octagon"
         case .hang: return "hourglass"
         case .panic: return "exclamationmark.triangle.fill"
         case .resource: return "gauge.with.dots.needle.67percent"
@@ -705,11 +804,11 @@ private struct StabilityList: View {
         }
     }
 
-    private func color(_ kind: StabilityEvent.Kind) -> Color {
-        switch kind {
-        case .crash, .panic: return .red
+    private func color(_ event: StabilityEvent) -> Color {
+        switch event.kind {
+        case .crash: return isService(event) ? .blue : .red
+        case .panic: return .red
         case .hang, .memory: return .orange
-        case .resource: return .yellow
         default: return .secondary
         }
     }

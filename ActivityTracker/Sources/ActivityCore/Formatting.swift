@@ -26,6 +26,16 @@ public enum Format {
         return "\(total)\(s)"
     }
 
+    /// Long spans: 1_958_520 → "22д 16ч" / "22d 16h"; under a day like `duration`.
+    public static func longDuration(_ seconds: TimeInterval) -> String {
+        guard seconds >= 86400 else { return duration(seconds) }
+        let total = Int(seconds)
+        let days = total / 86400
+        let hours = (total % 86400) / 3600
+        let (d, h) = L.current == .en ? ("d", "h") : ("д", "ч")
+        return hours > 0 ? "\(days)\(d) \(hours)\(h)" : "\(days)\(d)"
+    }
+
     /// 15_300_000_000 → "15,3 ГБ" / "15.3 GB".
     public static func bytes(_ count: Double) -> String {
         let units = L.current == .en ? ["B", "KB", "MB", "GB", "TB"] : ["Б", "КБ", "МБ", "ГБ", "ТБ"]

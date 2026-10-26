@@ -245,9 +245,13 @@ public final class StabilityStore {
 public struct StabilityReport: Equatable {
     public struct Week: Equatable, Identifiable {
         public var start: Date
+        /// Crashes of the user's own programs.
         public var crashes: Int
         public var hangs: Int
+        /// Resource complaints, memory pressure, kernel panics.
         public var other: Int
+        /// Crashes of macOS background services (they restart by themselves).
+        public var serviceCrashes: Int = 0
 
         public var id: Date { start }
     }
@@ -258,6 +262,8 @@ public struct StabilityReport: Equatable {
         public var hangs: Int
 
         public var id: String { name }
+        /// A macOS background service rather than a program the user runs.
+        public var isSystem: Bool { StabilityNames.isSystem(name) }
     }
 
     public var weeks: [Week]
@@ -266,6 +272,10 @@ public struct StabilityReport: Equatable {
     public var crashes7: Int
     public var hangs7: Int
     public var panics30: Int
+    /// Of `crashes7`: crashes of macOS services.
+    public var serviceCrashes7: Int = 0
+    /// The user's programs that crashed or hung at least 3 times in 7 days, most first.
+    public var frequent: [AppCount] = []
     public var recent: [StabilityEvent]
     /// macOS versions in the order they appeared, with the first date seen.
     public var versions: [StabilityEvent]
@@ -278,6 +288,7 @@ public struct StabilityReport: Equatable {
         }
         let firstWeek = weeks.first?.start ?? thisWeek
         var apps: [String: AppCount] = [:]
+        var week: [String: AppCount] = [:]
         let monthAgo = now.addingTimeInterval(-30 * 86400)
         let weekAgo = now.addingTimeInterval(-7 * 86400)
         var report = StabilityReport(weeks: [], apps: [], crashes7: 0, hangs7: 0, panics30: 0, recent: [], versions: [])
@@ -285,6 +296,7 @@ public struct StabilityReport: Equatable {
         for event in events {
             if event.at >= firstWeek, let index = weeks.lastIndex(where: { $0.start <= event.at }) {
                 switch event.kind {
+                case .crash where StabilityNames.isSystem(event.name): weeks[index].serviceCrashes += 1
                 case .crash: weeks[index].crashes += 1
                 case .hang: weeks[index].hangs += 1
                 case .panic, .resource, .memory: weeks[index].other += 1
@@ -298,16 +310,124 @@ public struct StabilityReport: Equatable {
             }
             if event.at >= weekAgo {
                 if event.kind == .crash { report.crashes7 += 1 }
+                if event.kind == .crash, StabilityNames.isSystem(event.name) { report.serviceCrashes7 += 1 }
                 if event.kind == .hang { report.hangs7 += 1 }
+                if event.kind == .crash || event.kind == .hang, !StabilityNames.isSystem(event.name) {
+                    var count = week[event.name] ?? AppCount(name: event.name, crashes: 0, hangs: 0)
+                    if event.kind == .crash { count.crashes += 1 } else { count.hangs += 1 }
+                    week[event.name] = count
+                }
             }
             if event.at >= monthAgo, event.kind == .panic { report.panics30 += 1 }
         }
         report.weeks = weeks
         report.apps = apps.values.sorted {
             ($0.crashes + $0.hangs, $1.name) > ($1.crashes + $1.hangs, $0.name)
-        }.prefix(8).map { $0 }
+        }.prefix(20).map { $0 }
+        report.frequent = week.values.filter { $0.crashes + $0.hangs >= 3 }.sorted {
+            ($0.crashes + $0.hangs, $1.name) > ($1.crashes + $1.hangs, $0.name)
+        }
         report.recent = Array(events.filter { $0.kind != .boot }.prefix(200))
         report.versions = events.filter { $0.kind == .os }
         return report
+    }
+}
+
+/// The one-line answer at the top of the Stability pane: is everything fine, and what to do if not.
+public struct StabilityVerdict: Equatable {
+    public enum Level: Equatable {
+        case ok, attention, problem
+    }
+
+    public var level: Level
+    public var title: String
+    public var details: [String]
+    public var suggestRestart: Bool
+}
+
+extension StabilityReport {
+    /// Restart is suggested after 30 days without one (a monthly restart is enough), or earlier when macOS
+    /// services keep crashing (5+ a week, at least 3 days of uptime).
+    public func verdict(uptime: TimeInterval?) -> StabilityVerdict {
+        var level = StabilityVerdict.Level.ok
+        var title = L.tr("С Mac всё в порядке", "Your Mac is fine")
+        var details: [String] = []
+        if panics30 > 0 {
+            level = .problem
+            title = L.tr("Mac перезагружался из-за сбоя системы", "The Mac restarted because of a system failure")
+            details.append(L.tr("Kernel panic за 30 дней: \(panics30). Если повторится — обнови macOS и проверь подключённые устройства (переходники, диски).",
+                                "Kernel panics in 30 days: \(panics30). If it happens again, update macOS and check connected devices (adapters, drives)."))
+        }
+        for app in frequent {
+            if level == .ok {
+                level = .attention
+                title = L.tr("Есть программы, которые часто падают", "Some programs crash often")
+            }
+            details.append(L.tr("\(app.name): \(app.crashes + app.hangs) раз за неделю. Обнови программу; для браузера — проверь расширения.",
+                                "\(app.name): \(app.crashes + app.hangs) times this week. Update it; for a browser, check its extensions."))
+        }
+        if level == .ok, serviceCrashes7 > 0 {
+            details.append(L.tr("Сбоили только фоновые службы macOS (\(serviceCrashes7) раз за неделю) — они перезапускаются сами, обычно это незаметно.",
+                                "Only macOS background services crashed (\(serviceCrashes7) times this week); they restart by themselves, usually unnoticed."))
+        }
+        let day: TimeInterval = 86400
+        let restart = uptime.map { $0 >= 30 * day || ($0 >= 3 * day && serviceCrashes7 >= 5) } ?? false
+        if restart, let uptime {
+            details.append(L.tr("Mac не перезагружался \(Format.longDuration(uptime)). Перезагрузи — это обычно убирает мелкие сбои служб.",
+                                "No restart for \(Format.longDuration(uptime)). Restart: it usually clears small service glitches."))
+        }
+        return StabilityVerdict(level: level, title: title, details: details, suggestRestart: restart)
+    }
+}
+
+/// Plain names for macOS background processes that show up in crash reports.
+public enum StabilityNames {
+    private static let known: [String: (ru: String, en: String)] = [
+        "textunderstandingd": ("анализ текста (подсказки, Apple Intelligence)", "text analysis (suggestions, Apple Intelligence)"),
+        "intelligenceplatformd": ("Apple Intelligence", "Apple Intelligence"),
+        "bluetoothd": ("Bluetooth", "Bluetooth"),
+        "nsattributedstringagent": ("отображение форматированного текста", "rendering formatted text"),
+        "WindowServer": ("вывод изображения на экран", "drawing the screen"),
+        "mds": ("поиск Spotlight", "Spotlight search"),
+        "mds_stores": ("поиск Spotlight", "Spotlight search"),
+        "mdworker": ("поиск Spotlight", "Spotlight search"),
+        "mdworker_shared": ("поиск Spotlight", "Spotlight search"),
+        "corespotlightd": ("поиск Spotlight", "Spotlight search"),
+        "photoanalysisd": ("анализ фото", "photo analysis"),
+        "mediaanalysisd": ("анализ фото и видео", "photo and video analysis"),
+        "cloudd": ("iCloud", "iCloud"),
+        "bird": ("iCloud Drive", "iCloud Drive"),
+        "coreaudiod": ("звук", "audio"),
+        "airportd": ("Wi-Fi", "Wi-Fi"),
+        "WiFiAgent": ("Wi-Fi", "Wi-Fi"),
+        "locationd": ("геолокация", "location"),
+        "sharingd": ("AirDrop и Handoff", "AirDrop and Handoff"),
+        "rapportd": ("связь с другими устройствами Apple", "talking to your other Apple devices"),
+        "nsurlsessiond": ("загрузки в фоне", "background downloads"),
+        "softwareupdated": ("обновления macOS", "macOS updates"),
+        "suggestd": ("подсказки Siri", "Siri suggestions"),
+        "assistantd": ("Siri", "Siri"),
+        "siriactionsd": ("Siri", "Siri"),
+        "Finder": ("Finder", "Finder"),
+        "Dock": ("Dock и Launchpad", "Dock and Launchpad"),
+        "SystemUIServer": ("значки в строке меню", "menu bar items"),
+        "ControlCenter": ("Пункт управления", "Control Center"),
+        "NotificationCenter": ("уведомления", "notifications"),
+        "loginwindow": ("вход в систему", "login window"),
+        "launchd": ("запуск служб macOS", "starting macOS services"),
+        "kernel_task": ("ядро macOS", "the macOS kernel"),
+    ]
+
+    /// A macOS service (not a program the user runs): known names, Apple bundle IDs, or lowercase daemon-style
+    /// names ending in "d" / "agent" / "service" or containing "helper".
+    public static func isSystem(_ name: String) -> Bool {
+        if known[name] != nil || name.hasPrefix("com.apple.") || name == "macOS" { return true }
+        guard name == name.lowercased(), !name.contains(" ") else { return false }
+        return name.hasSuffix("d") || name.hasSuffix("agent") || name.hasSuffix("service") || name.contains("helper")
+    }
+
+    /// "анализ текста (подсказки, Apple Intelligence)" — or nil for an unknown name.
+    public static func describe(_ name: String) -> String? {
+        known[name].map { L.tr($0.ru, $0.en) }
     }
 }

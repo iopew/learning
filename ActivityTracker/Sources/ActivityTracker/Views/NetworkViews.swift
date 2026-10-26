@@ -124,30 +124,55 @@ private struct NetworkCard: View {
                     .help(L.tr("Переименовать", "Rename"))
                 }
             }
+            if let verdict {
+                Text(verdict).font(.callout).fixedSize(horizontal: false, vertical: true)
+            }
             Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 6) {
                 GridRow {
-                    cell(L.tr("Скачано ↓", "Downloaded ↓"), Format.bytes(network.rx))
-                    cell(L.tr("Отправлено ↑", "Uploaded ↑"), Format.bytes(network.tx))
-                    cell(L.tr("Подключён", "Connected"), Format.duration(network.connected))
+                    cell(L.tr("Скачано ↓", "Downloaded ↓"), Format.bytes(network.rx),
+                         L.tr("Сколько данных пришло из интернета в эту сеть за период.", "Data received over this network in the period."))
+                    cell(L.tr("Отправлено ↑", "Uploaded ↑"), Format.bytes(network.tx),
+                         L.tr("Сколько данных Mac отправил: загрузки файлов, бэкапы, видеозвонки.", "Data the Mac sent: uploads, backups, video calls."))
+                    cell(L.tr("Подключён", "Connected"), Format.duration(network.connected),
+                         L.tr("Сколько времени Mac был в этой сети (пока не спал).", "How long the Mac was on this network (while awake)."))
                 }
                 GridRow {
-                    cell(L.tr("Средняя скорость ↓", "Average speed ↓"), network.averageDown.map(Format.bitrate) ?? "—")
-                    cell(L.tr("Средняя скорость ↑", "Average speed ↑"), network.averageUp.map(Format.bitrate) ?? "—")
-                    cell(L.tr("Пик ↓ / ↑", "Peak ↓ / ↑"), "\(Format.bitrate(network.peakDown)) / \(Format.bitrate(network.peakUp))")
+                    cell(L.tr("Средняя скорость ↓", "Average speed ↓"), network.averageDown.map(Format.bitrate) ?? "—",
+                         L.tr("С какой скоростью реально качалось, пока что-то качалось. Это не предел тарифа: сайт мог отдавать медленнее.",
+                              "How fast data actually came while something was downloading. Not your plan's limit: the server may have been slower."))
+                    cell(L.tr("Средняя скорость ↑", "Average speed ↑"), network.averageUp.map(Format.bitrate) ?? "—",
+                         L.tr("То же для отправки.", "The same for uploads."))
+                    cell(L.tr("Пик ↓ / ↑", "Peak ↓ / ↑"), "\(Format.bitrate(network.peakDown)) / \(Format.bitrate(network.peakUp))",
+                         L.tr("Самая высокая скорость за 5 секунд. Ближе всего к тому, на что способна сеть.",
+                              "The fastest 5 seconds. The closest to what the network can do."))
                 }
                 GridRow {
-                    cell(L.tr("Пинг до интернета", "Ping to the internet"), network.pingInternet.map(Format.milliseconds) ?? "—")
-                    cell(L.tr("Пинг до роутера", "Ping to the router"), network.pingRouter.map(Format.milliseconds) ?? "—")
-                    cell(L.tr("Потери пакетов", "Packet loss"), network.loss.map { Format.percent($0, of: 1) } ?? "—")
+                    cell(L.tr("Пинг до интернета", "Ping to the internet"), network.pingInternet.map(Format.milliseconds) ?? "—",
+                         L.tr("Задержка до сервера 1.1.1.1 в интернете. До 50 мс — отлично, 50–100 — нормально, больше 100 — заметно в играх и звонках.",
+                              "Delay to the 1.1.1.1 server. Under 50 ms is great, 50–100 fine, over 100 noticeable in games and calls."))
+                    cell(L.tr("Пинг до роутера", "Ping to the router"), network.pingRouter.map(Format.milliseconds) ?? "—",
+                         L.tr("Задержка только по Wi-Fi или кабелю до роутера. До 10 мс — Wi-Fi в порядке; больше 20 — проблема в Wi-Fi, а не у провайдера.",
+                              "Delay over Wi-Fi or cable to the router only. Under 10 ms: Wi-Fi is fine; over 20: the problem is the Wi-Fi, not the provider."))
+                    cell(L.tr("Потери пакетов", "Packet loss"), network.loss.map { Format.percent($0, of: 1) } ?? "—",
+                         L.tr("Доля пингов без ответа. Больше 1–2% — связь нестабильная: обрывы звонков, подвисания.",
+                              "Share of pings without an answer. Over 1–2%: an unstable connection, dropped calls, stalls."))
                 }
                 GridRow {
-                    cell(L.tr("Скорость Wi-Fi", "Wi-Fi link"), network.linkRate.map { L.tr("\(Int($0)) Мбит/с", "\(Int($0)) Mbit/s") } ?? "—")
-                    cell(L.tr("Сигнал", "Signal"), network.rssi.map { "\(Int($0)) dBm · " + signalWord($0) } ?? "—")
+                    cell(L.tr("Скорость Wi-Fi", "Wi-Fi link"), network.linkRate.map { L.tr("\(Int($0)) Мбит/с", "\(Int($0)) Mbit/s") } ?? "—",
+                         L.tr("Скорость радиосвязи между Mac и роутером, а не скорость интернета. Интернет обычно медленнее: дальше роутера идёт линия провайдера.",
+                              "The radio link between the Mac and the router, not the internet speed. The internet is usually slower: past the router it's the provider's line."))
+                    cell(L.tr("Сигнал", "Signal"), network.rssi.map { "\(Int($0)) dBm · " + signalWord($0) } ?? "—",
+                         L.tr("Сила сигнала Wi-Fi: ближе к нулю — лучше. −50 отлично, −67 хорошо, ниже −75 слабо.",
+                              "Wi-Fi signal strength: closer to zero is better. −50 excellent, −67 good, below −75 weak."))
                     cell(L.tr("Обрывы", "Outages"), network.outages == 0 ? L.tr("не было", "none")
                          : L.tr("\(network.outages), всего \(Format.duration(network.outageTime))",
-                                "\(network.outages), \(Format.duration(network.outageTime)) in total"))
+                                "\(network.outages), \(Format.duration(network.outageTime)) in total"),
+                         L.tr("Минуты, когда сеть была, а интернет не отвечал.", "Minutes when the network was up but the internet didn't answer."))
                 }
             }
+            Text(L.tr("Наведи на показатель, чтобы увидеть, что он значит.", "Hover over a value to see what it means."))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             Text(L.tr("Впервые: \(date(network.firstSeen)) · последний раз: \(date(network.lastSeen))",
                       "First seen: \(date(network.firstSeen)) · last: \(date(network.lastSeen))"))
                 .font(.caption)
@@ -184,12 +209,41 @@ private struct NetworkCard: View {
         return L.tr("слабый", "weak")
     }
 
-    private func cell(_ title: String, _ value: String) -> some View {
+    private func cell(_ title: String, _ value: String, _ help: String) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(title).font(.caption).foregroundStyle(.secondary)
             Text(value).monospacedDigit()
         }
         .frame(minWidth: 180, alignment: .leading)
+        .contentShape(Rectangle())
+        .help(help)
+    }
+
+    /// "Wi-Fi отличный, задержка — у провайдера": what the numbers mean together.
+    private var verdict: String? {
+        var parts: [String] = []
+        let wifiWeak = (network.rssi.map { $0 < -72 } ?? false) || (network.pingRouter.map { $0 > 20 } ?? false)
+        if network.kind == .wifi || network.kind == .hotspot, network.rssi != nil || network.pingRouter != nil {
+            parts.append(wifiWeak ? L.tr("Wi-Fi слабый: подойди ближе к роутеру или убери преграды", "Weak Wi-Fi: move closer to the router or remove obstacles")
+                                  : L.tr("Wi-Fi в порядке", "Wi-Fi is fine"))
+        }
+        if let ping = network.pingInternet {
+            if ping > 100 {
+                parts.append(wifiWeak ? L.tr("интернет с большой задержкой", "high internet delay")
+                                      : L.tr("большая задержка у провайдера", "high delay at the provider"))
+            } else {
+                parts.append(L.tr("задержка интернета нормальная", "internet delay is normal"))
+            }
+        }
+        if let loss = network.loss, loss > 0.02 {
+            parts.append(L.tr("теряются пакеты — связь нестабильная", "packets get lost: the connection is unstable"))
+        }
+        if network.outages > 0 {
+            parts.append(L.tr("были обрывы интернета", "the internet dropped out"))
+        }
+        guard !parts.isEmpty else { return nil }
+        let text = parts.joined(separator: ", ")
+        return text.prefix(1).uppercased() + text.dropFirst() + "."
     }
 
     private func date(_ date: Date) -> String {

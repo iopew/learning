@@ -644,3 +644,55 @@ final class CompactStorageTests: XCTestCase {
         XCTAssertEqual(after.buckets.count, 2)
     }
 }
+
+final class StabilityVerdictTests: XCTestCase {
+    override func setUp() {
+        L.current = .ru
+    }
+
+    private func report(_ events: [StabilityEvent], now: Date) -> StabilityReport {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Tashkent")!
+        return StabilityReport.make(events, now: now, days: DayCalendar(calendar: calendar))
+    }
+
+    func testServiceNames() {
+        XCTAssertTrue(StabilityNames.isSystem("textunderstandingd"))
+        XCTAssertTrue(StabilityNames.isSystem("bluetoothd"))
+        XCTAssertTrue(StabilityNames.isSystem("nsattributedstringagent"))
+        XCTAssertTrue(StabilityNames.isSystem("WindowServer"))
+        XCTAssertFalse(StabilityNames.isSystem("Safari"))
+        XCTAssertFalse(StabilityNames.isSystem("steam_osx"))
+        XCTAssertFalse(StabilityNames.isSystem("Google Chrome Helper (Renderer)"))
+        XCTAssertNotNil(StabilityNames.describe("textunderstandingd"))
+        XCTAssertNil(StabilityNames.describe("Safari"))
+        XCTAssertEqual(Format.longDuration(544 * 3600 + 120), "22д 16ч")
+    }
+
+    func testVerdicts() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        func crash(_ name: String, _ hoursAgo: Double) -> StabilityEvent {
+            StabilityEvent(source: "\(name)-\(hoursAgo)", at: now.addingTimeInterval(-hoursAgo * 3600), kind: .crash,
+                           name: name, detail: "")
+        }
+        // Only services crashed, 23 days up: fine, but restart.
+        let services = report((0..<7).map { crash("textunderstandingd", Double($0)) } + [crash("bluetoothd", 9)], now: now)
+        XCTAssertEqual(services.serviceCrashes7, 8)
+        XCTAssertEqual(services.weeks.last.map { $0.serviceCrashes + $0.crashes }, 8)
+        let fine = services.verdict(uptime: 23 * 86400)
+        XCTAssertEqual(fine.level, .ok)
+        XCTAssertTrue(fine.suggestRestart)
+        XCTAssertFalse(services.verdict(uptime: 3600).suggestRestart)
+
+        // A program crashing three times a week needs attention.
+        let safari = report([crash("Safari", 1), crash("Safari", 20), crash("Safari", 50), crash("steam_osx", 2)], now: now)
+        XCTAssertEqual(safari.frequent.map(\.name), ["Safari"])
+        let verdict = safari.verdict(uptime: 86400)
+        XCTAssertEqual(verdict.level, .attention)
+        XCTAssertFalse(verdict.suggestRestart)
+        XCTAssertTrue(verdict.details.first?.hasPrefix("Safari: 3 раз") == true)
+
+        let panic = report([StabilityEvent(source: "p", at: now.addingTimeInterval(-86400), kind: .panic, name: "macOS", detail: "")], now: now)
+        XCTAssertEqual(panic.verdict(uptime: nil).level, .problem)
+    }
+}
