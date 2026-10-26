@@ -21,6 +21,7 @@ enum DataEraser {
         services.sampler.erase(what)
         do {
             try services.networkStore.erase(what)
+            try services.machineStore.erase(what)
         } catch {
             NSLog("ActivityTracker: erase network data: \(error)")
         }

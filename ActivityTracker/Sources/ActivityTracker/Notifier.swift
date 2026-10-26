@@ -9,7 +9,7 @@ import ActivityCore
 final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     private let store: ActivityStore
     private let systemStore: SystemStore
-    private let settings: Settings
+    let settings: Settings
     private let queue = DispatchQueue(label: "ActivityTracker.notifier", qos: .utility)
     private var timer: Timer?
     private var coach = BreakCoach()
@@ -70,7 +70,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         completionHandler()
     }
 
-    private func post(id: String, _ message: DigestMessage, sound: Bool = false) {
+    func post(id: String, _ message: DigestMessage, sound: Bool = false) {
         guard canNotify else { return }
         let content = UNMutableNotificationContent()
         content.title = message.title
@@ -166,6 +166,17 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             body: L.tr("\(Format.duration(streak)) без перерыва. Встань, разомнись и дай глазам отдохнуть 5–10 минут.",
                        "\(Format.duration(streak)) without a break. Stand up, stretch and rest your eyes for 5–10 minutes.")),
              sound: true)
+    }
+}
+
+extension Notifier {
+    /// "gopls грузит процессор на 90% уже 12 минут, пока тебя нет".
+    func runaway(name: String, percent: Int, minutes: TimeInterval) {
+        guard settings.watchdogAlerts else { return }
+        post(id: "runaway-\(name)", DigestMessage(
+            title: L.tr("\(name) грузит процессор", "\(name) is keeping the CPU busy"),
+            body: L.tr("\(percent)% одного ядра уже \(Format.duration(minutes)), пока тебя нет. Если это не нужно — закрой его в Мониторинге системы.",
+                       "\(percent)% of a core for \(Format.duration(minutes)) while you're away. If it isn't needed, quit it in Activity Monitor.")))
     }
 }
 

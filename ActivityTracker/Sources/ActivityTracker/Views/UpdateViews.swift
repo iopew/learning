@@ -82,10 +82,17 @@ struct UpdateSettings: View {
                 Button(L.tr("Проверить сейчас", "Check now")) { updater.check(userInitiated: true) }
                     .disabled(updater.isBusy)
             }
-            Text(statusText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Text(statusText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if case .available(let update) = updater.phase {
+                    Spacer()
+                    Button(L.tr("Обновить", "Update")) { updater.install(update) }
+                        .disabled(!updater.canInstall)
+                }
+            }
             if !updater.canInstall {
                 Text(L.tr("Чтобы обновляться, приложение должно лежать в папке «Программы».", "To update, the app must be in the Applications folder."))
                     .font(.caption)

@@ -78,6 +78,8 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                    Toggle(L.tr("Сообщать, если процесс грузит процессор, пока меня нет", "Tell me when a process keeps the CPU busy while I'm away"),
+                           isOn: $settings.watchdogAlerts)
                     Toggle(L.tr("Напоминать о перерыве", "Remind me to take a break"), isOn: $settings.breakReminders)
                     Text(L.tr("После 1,5–2 часов работы без перерыва, в естественной паузе (сменил приложение, перестал печатать). Во время звонка молчит.",
                               "After 1.5–2 hours of work without a break, at a natural pause (you switched apps or stopped typing). Silent during calls."))

@@ -222,8 +222,16 @@ struct MainWindowView: View {
             case .compare: ComparisonPane()
             case .stability: StabilityPane()
             case .network: NetworkPane()
-            case .battery: single { if let system = stats.system { BatteryPanel(system: system, chartHeight: 220) } }
-            case .system: single { if let system = stats.system { SystemPanel(system: system, chartHeight: 200) } }
+            case .battery:
+                single {
+                    if let system = stats.system { BatteryPanel(system: system, chartHeight: 220) }
+                    if let machine = stats.machine { BatteryDetails(machine: machine) }
+                }
+            case .system:
+                single {
+                    if let system = stats.system { SystemPanel(system: system, chartHeight: 200) }
+                    if let machine = stats.machine { SystemDetails(machine: machine) }
+                }
             case .tips:
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {

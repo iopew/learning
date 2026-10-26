@@ -319,20 +319,20 @@ public final class ActivityStore {
         }
     }
 
-    /// Events of the days `from`…`to` without titles and URLs (lighter): for switches and streaks.
+    /// Events of the days `from`…`to` without titles and URLs (lighter): for switches, streaks, battery costs.
     public func spans(from: Date, to: Date) throws -> [ActivityEvent] {
         lock.lock()
         defer { lock.unlock() }
 
         return try db.query(
-            "SELECT id, start_at, end_at, bundle_id, app FROM events WHERE day BETWEEN ? AND ? ORDER BY start_at",
+            "SELECT id, start_at, end_at, bundle_id, app, domain FROM events WHERE day BETWEEN ? AND ? ORDER BY start_at",
             [.text(days.key(from)), .text(days.key(to))]
         ) { row in
             ActivityEvent(
                 id: row.int(0),
                 start: Date(timeIntervalSince1970: row.double(1)),
                 end: Date(timeIntervalSince1970: row.double(2)),
-                bundleID: row.text(3), appName: row.text(4), title: "", url: "", domain: "")
+                bundleID: row.text(3), appName: row.text(4), title: "", url: "", domain: row.text(5))
         }
     }
 

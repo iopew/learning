@@ -183,12 +183,14 @@ final class ArchiveSession: NSObject, NSWindowDelegate {
             let store = try ActivityStore(path: copy.path, days: days)
             let system = try SystemStore(path: copy.path, days: days)
             let network = try NetworkStore(path: copy.path, days: days)
+            let machine = try MachineStore(path: copy.path, days: days)
             try store.rekeyDays()
             try system.rekeyDays()
             try network.rekeyDays()
+            try machine.rekeyDays()
             let summary = try store.historySummary()
             let last = summary.last ?? days.startOfDay(Date())
-            let stats = StatsModel(store: store, systemStore: system, networkStore: network, anchor: last)
+            let stats = StatsModel(store: store, systemStore: system, networkStore: network, machineStore: machine, anchor: last)
             let insights = InsightsModel(store: store, now: { last })
             let stability = StabilityMonitor(path: copy.path, days: days)
             stability.openReadOnly()
@@ -291,8 +293,16 @@ struct ArchiveView: View {
             case .activity: activity
             case .rhythm: RhythmPane(showsBoundary: false)
             case .compare: ComparisonPane()
-            case .battery: single { if let system = stats.system { BatteryPanel(system: system, chartHeight: 220) } }
-            case .system: single { if let system = stats.system { SystemPanel(system: system, chartHeight: 200) } }
+            case .battery:
+                single {
+                    if let system = stats.system { BatteryPanel(system: system, chartHeight: 220) }
+                    if let machine = stats.machine { BatteryDetails(machine: machine) }
+                }
+            case .system:
+                single {
+                    if let system = stats.system { SystemPanel(system: system, chartHeight: 200) }
+                    if let machine = stats.machine { SystemDetails(machine: machine) }
+                }
             case .network: NetworkPane(isArchive: true)
             case .stability: StabilityPane()
             }

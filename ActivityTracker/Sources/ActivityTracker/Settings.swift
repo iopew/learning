@@ -91,6 +91,8 @@ final class Settings: ObservableObject {
     }
     /// Hour of the digest (18…23).
     @Published var digestHour: Int { didSet { defaults.set(digestHour, forKey: Keys.digestHour) } }
+    /// Notify when a process keeps the CPU busy for 10+ minutes while the user is away.
+    @Published var watchdogAlerts: Bool { didSet { defaults.set(watchdogAlerts, forKey: Keys.watchdogAlerts) } }
     /// Suggest a break after 90–120 minutes of work, at a natural pause.
     @Published var breakReminders: Bool {
         didSet {
@@ -117,6 +119,7 @@ final class Settings: ObservableObject {
         static let digestEnabled = "digestEnabled"
         static let digestHour = "digestHour"
         static let breakReminders = "breakReminders"
+        static let watchdogAlerts = "watchdogAlerts"
         static let loginItemConfigured = "loginItemConfigured"
         static let accessibilityPromptVersion = "accessibilityPromptVersion"
     }
@@ -140,6 +143,7 @@ final class Settings: ObservableObject {
             Keys.digestEnabled: true,
             Keys.digestHour: 21,
             Keys.breakReminders: true,
+            Keys.watchdogAlerts: true,
         ])
         isPaused = defaults.bool(forKey: Keys.isPaused)
         idleThreshold = defaults.double(forKey: Keys.idleThreshold)
@@ -157,6 +161,7 @@ final class Settings: ObservableObject {
         digestEnabled = defaults.bool(forKey: Keys.digestEnabled)
         digestHour = min(max(defaults.integer(forKey: Keys.digestHour), 18), 23)
         breakReminders = defaults.bool(forKey: Keys.breakReminders)
+        watchdogAlerts = defaults.bool(forKey: Keys.watchdogAlerts)
     }
 
     func applyAppearance() {

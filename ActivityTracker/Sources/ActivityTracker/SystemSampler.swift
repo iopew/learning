@@ -1,6 +1,8 @@
 import AppKit
 import Darwin
 import IOKit
+import IOKit.ps
+import IOKit.pwr_mgt
 import ActivityCore
 
 /// Once a minute, on a background queue: battery (IOKit AppleSmartBattery), CPU and memory (Mach host statistics),
@@ -10,14 +12,27 @@ final class SystemSampler {
     static let interval: TimeInterval = 60
 
     private let store: SystemStore
+    private let machine: MachineStore
     private let queue = DispatchQueue(label: "ActivityTracker.system", qos: .utility)
     private var timer: Timer?
     private var lastSampleAt: Date?
     private var previousCPU: (busy: UInt64, total: UInt64)?
     private let energy = EnergyMeter()
+    /// Only touched on `queue`.
+    private var lastWrites: Double?
+    private var lastWritesCheck: Date?
+    private var hotSince: [String: (since: Date, alerted: Bool)] = [:]
+    private var observers: [NSObjectProtocol] = []
 
-    init(store: SystemStore) {
+    /// A process using at least this share of one core for `watchdogMinutes` while the user is away is reported.
+    static let watchdogShare = 0.8
+    static let watchdogMinutes: TimeInterval = 10 * 60
+    /// The user counts as away (for sleep blockers and the watchdog) after this long without input.
+    static let awayAfter: TimeInterval = 5 * 60
+
+    init(store: SystemStore, machine: MachineStore) {
         self.store = store
+        self.machine = machine
     }
 
     func start() {
@@ -30,7 +45,36 @@ final class SystemSampler {
         queue.async { [self] in
             _ = cpuLoad()
             energy.baseline()
+            lastWrites = Self.ssdBytesWritten()
+            lastWritesCheck = Date()
         }
+        // Sleep and wake with the battery level and macOS's dark-wake counter: the night card.
+        let center = NSWorkspace.shared.notificationCenter
+        for (name, kind) in [(NSWorkspace.willSleepNotification, PowerEvent.Kind.sleep),
+                             (NSWorkspace.didWakeNotification, PowerEvent.Kind.wake)] {
+            observers.append(center.addObserver(forName: name, object: nil, queue: nil) { [weak self] _ in
+                self?.recordPower(kind)
+            })
+        }
+    }
+
+    private func recordPower(_ kind: PowerEvent.Kind) {
+        let now = Date()
+        let percent = BatteryReader.read()?.percent   // quick (I/O Registry), before the Mac goes to sleep
+        queue.async { [self] in
+            let event = PowerEvent(at: now, kind: kind, percent: percent, darkWakeCount: Self.darkWakeCount())
+            do {
+                try machine.record(event)
+            } catch {
+                NSLog("ActivityTracker: power event: \(error)")
+            }
+        }
+    }
+
+    /// `pmset -g stats`: the number of dark wakes since boot.
+    private static func darkWakeCount() -> Int? {
+        guard let output = try? Installer.run("/usr/bin/pmset", ["-g", "stats"]) else { return nil }
+        return SleepNights.darkWakeCount(inStats: output)
     }
 
     func stop() {
@@ -76,13 +120,117 @@ final class SystemSampler {
             sample.diskFree = disk.free
             sample.diskTotal = disk.total
             sample.thermalState = ProcessInfo.processInfo.thermalState.rawValue
+            if sample.onAC, let adapter = Self.adapter() {
+                sample.adapterWatts = adapter.watts
+                sample.adapterName = adapter.name
+            }
 
+            let apps = energy.collect()
             do {
-                try store.record(sample, interval: elapsed, energy: energy.collect())
+                try store.record(sample, interval: elapsed, energy: apps)
             } catch {
                 NSLog("ActivityTracker: system sample: \(error)")
             }
+            let idle = Idle.secondsSinceLastInput()
+            if idle >= Self.awayAfter {
+                recordSleepBlockers(seconds: elapsed, at: now)
+            }
+            watchdog(apps, elapsed: elapsed, idle: idle, now: now)
+            recordWrites(now)
         }
+    }
+
+    // MARK: Charger
+
+    /// Watts and name of the connected power adapter.
+    static func adapter() -> (watts: Double?, name: String?)? {
+        guard let details = IOPSCopyExternalPowerAdapterDetails()?.takeRetainedValue() as? [String: Any] else { return nil }
+        let watts = (details["Watts"] as? NSNumber)?.doubleValue
+        let name = (details["Name"] as? String) ?? (details["Manufacturer"] as? String)
+        return (watts, name)
+    }
+
+    // MARK: Hidden use
+
+    /// While the user is away: which processes hold a "don't sleep" assertion. Runs on `queue`.
+    private func recordSleepBlockers(seconds: TimeInterval, at now: Date) {
+        var unmanaged: Unmanaged<CFDictionary>?
+        guard IOPMCopyAssertionsByProcess(&unmanaged) == kIOReturnSuccess,
+              let byProcess = unmanaged?.takeRetainedValue() as? [NSNumber: [[String: Any]]]
+        else { return }
+        let types: Set<String> = ["PreventUserIdleSystemSleep", "PreventSystemSleep", "NoIdleSleepAssertion"]
+        var seen = Set<String>()
+        for (pid, assertions) in byProcess {
+            for assertion in assertions {
+                guard let type = assertion["AssertType"] as? String, types.contains(type) else { continue }
+                let process = (assertion["Process Name"] as? String) ?? Self.processName(pid.int32Value)
+                let reason = (assertion["AssertName"] as? String) ?? type
+                guard seen.insert(process + "|" + reason).inserted else { continue }
+                try? machine.addBlocker(process: process, reason: reason, seconds: seconds, at: now)
+            }
+        }
+    }
+
+    private static func processName(_ pid: pid_t) -> String {
+        var buffer = [CChar](repeating: 0, count: 256)
+        return proc_name(pid, &buffer, UInt32(buffer.count)) > 0 ? String(cString: buffer) : "pid \(pid)"
+    }
+
+    /// A process busy on the CPU for 10+ minutes while the user is away: one notification and a Stability entry
+    /// per stretch. Runs on `queue`.
+    private func watchdog(_ apps: [AppEnergy], elapsed: TimeInterval, idle: TimeInterval, now: Date) {
+        guard idle >= Self.awayAfter, elapsed > 0 else {
+            hotSince.removeAll()
+            return
+        }
+        var stillHot = Set<String>()
+        for app in apps where app.cpuSeconds / elapsed >= Self.watchdogShare {
+            stillHot.insert(app.bundleID)
+            var entry = hotSince[app.bundleID] ?? (now.addingTimeInterval(-elapsed), false)
+            let minutes = now.timeIntervalSince(entry.since)
+            if !entry.alerted, minutes >= Self.watchdogMinutes {
+                entry.alerted = true
+                let share = Int((app.cpuSeconds / elapsed * 100).rounded())
+                DispatchQueue.main.async {
+                    AppServices.shared.notifier.runaway(name: app.appName, percent: share, minutes: minutes)
+                    AppServices.shared.stability.recordRunaway(name: app.appName, percent: share, minutes: minutes, at: now)
+                }
+            }
+            hotSince[app.bundleID] = entry
+        }
+        hotSince = hotSince.filter { stillHot.contains($0.key) }
+    }
+
+    /// Bytes written to the internal disk, added up per day (checked hourly). Runs on `queue`.
+    private func recordWrites(_ now: Date) {
+        guard let last = lastWritesCheck, now.timeIntervalSince(last) >= 3600 else { return }
+        lastWritesCheck = now
+        guard let total = Self.ssdBytesWritten() else { return }
+        defer { lastWrites = total }
+        guard let previous = lastWrites else { return }
+        // After a restart the counter starts from zero.
+        let delta = total >= previous ? total - previous : total
+        try? machine.addWrites(delta, at: now)
+    }
+
+    /// "Bytes (Write)" of the storage drivers since boot (public I/O Registry statistics).
+    static func ssdBytesWritten() -> Double? {
+        var iterator: io_iterator_t = 0
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOBlockStorageDriver"), &iterator) == KERN_SUCCESS
+        else { return nil }
+        defer { IOObjectRelease(iterator) }
+        var total: Double = 0
+        var found = false
+        while case let service = IOIteratorNext(iterator), service != 0 {
+            defer { IOObjectRelease(service) }
+            guard let statistics = IORegistryEntryCreateCFProperty(service, "Statistics" as CFString, kCFAllocatorDefault, 0)?
+                .takeRetainedValue() as? [String: Any],
+                  let bytes = statistics["Bytes (Write)"] as? NSNumber
+            else { continue }
+            total += bytes.doubleValue
+            found = true
+        }
+        return found ? total : nil
     }
 
     // MARK: CPU

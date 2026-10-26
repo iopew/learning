@@ -56,6 +56,13 @@ public final class SystemStore {
             );
             CREATE INDEX IF NOT EXISTS charge_events_day ON charge_events(day);
             """)
+        // The charger of each plug-in (build 19+).
+        if !(try db.columns(of: "charge_events")).contains("adapter_watts") {
+            try db.execute("""
+                ALTER TABLE charge_events ADD COLUMN adapter_watts REAL;
+                ALTER TABLE charge_events ADD COLUMN adapter_name TEXT;
+                """)
+        }
         // Hourly roll-ups of old minutes (see rollUp): a mark, and the battery drain they stood for.
         let columns = try db.columns(of: "system_samples")
         if !columns.contains("rolled") {
@@ -158,8 +165,10 @@ public final class SystemStore {
                  .double(sample.diskTotal), .int(Int64(sample.thermalState))])
 
             if let previous = lastOnAC, previous != sample.onAC, sample.batteryPercent != nil {
-                try db.run("INSERT INTO charge_events(at, day, plugged, percent) VALUES(?,?,?,?)",
-                           [.double(at), .text(day), .int(sample.onAC ? 1 : 0), optional(sample.batteryPercent)])
+                try db.run("INSERT INTO charge_events(at, day, plugged, percent, adapter_watts, adapter_name) VALUES(?,?,?,?,?,?)",
+                           [.double(at), .text(day), .int(sample.onAC ? 1 : 0), optional(sample.batteryPercent),
+                            optional(sample.onAC ? sample.adapterWatts : nil),
+                            sample.onAC ? (sample.adapterName.map { SQLValue.text($0) } ?? SQLValue.null) : SQLValue.null])
             }
 
             // One row per app per hour (and power source): a year stays in the hundreds of thousands of rows.
@@ -213,6 +222,111 @@ public final class SystemStore {
 
     private func optional(_ value: Double?) -> SQLValue {
         value.map { .double($0) } ?? .null
+    }
+
+    // MARK: - Details for the Battery and System panes
+
+    /// Battery readings (minutes only, not rolled-up hours) of `from`…`to`, for the cost of activities.
+    public func batteryMinutes(from: Date, to: Date) throws -> [BatteryMinute] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return try db.query(
+            """
+            SELECT at, battery_percent, battery_watts, battery_watts IS NULL, on_ac FROM system_samples
+            WHERE day BETWEEN ? AND ? AND rolled = 0 AND battery_percent IS NOT NULL ORDER BY at
+            """, [.text(days.key(from)), .text(days.key(to))]
+        ) { row in
+            BatteryMinute(at: Date(timeIntervalSince1970: row.double(0)), percent: row.double(1),
+                          watts: row.int(3) != 0 ? nil : row.double(2), onAC: row.int(4) != 0)
+        }
+    }
+
+    /// Plug-in → unplug sessions that started within `from`…`to`, newest first.
+    public func chargeSessions(from: Date, to: Date) throws -> [ChargeSession] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let rows = try db.query(
+            """
+            SELECT at, plugged, percent, percent IS NULL, adapter_watts, adapter_watts IS NULL, COALESCE(adapter_name, '')
+            FROM charge_events WHERE day BETWEEN ? AND ? ORDER BY at
+            """, [.text(days.key(from)), .text(days.key(days.addingDays(1, to: to)))]
+        ) { row in
+            (at: Date(timeIntervalSince1970: row.double(0)), plugged: row.int(1) != 0,
+             percent: row.int(3) != 0 ? nil : row.double(2), watts: row.int(5) != 0 ? nil : row.double(4), name: row.text(6))
+        }
+        var sessions: [ChargeSession] = []
+        let last = days.addingDays(1, to: days.startOfDay(to))
+        for (index, row) in rows.enumerated() where row.plugged && row.at < last {
+            let unplug = rows[(index + 1)...].first { !$0.plugged }
+            var session = ChargeSession(start: row.at, end: unplug?.at, startPercent: row.percent,
+                                        endPercent: unplug?.percent, adapterWatts: row.watts,
+                                        adapterName: row.name.isEmpty ? nil : row.name, averageChargeWatts: nil)
+            let end = unplug?.at ?? Date()
+            session.averageChargeWatts = try db.query(
+                """
+                SELECT SUM(battery_watts * interval) / SUM(interval) FROM system_samples
+                WHERE at > ? AND at <= ? AND charging = 1 AND battery_watts > 0
+                """, [.double(row.at.timeIntervalSince1970), .double(end.timeIntervalSince1970)]
+            ) { $0.double(0) }.first.flatMap { $0 > 0 ? $0 : nil }
+            if session.endPercent == nil, unplug == nil {
+                session.endPercent = try db.query(
+                    "SELECT battery_percent FROM system_samples WHERE battery_percent IS NOT NULL ORDER BY at DESC LIMIT 1"
+                ) { $0.double(0) }.first
+            }
+            sessions.append(session)
+        }
+        return sessions.reversed()
+    }
+
+    /// Battery health and cycle count per day over the whole history, oldest first.
+    public func batteryHistory() throws -> [(day: Date, health: Double?, cycles: Int?)] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return try db.query(
+            """
+            SELECT day, AVG(health), COUNT(health), MAX(cycle_count), COUNT(cycle_count) FROM system_samples
+            WHERE battery_percent IS NOT NULL GROUP BY day ORDER BY day
+            """
+        ) { row -> (day: Date, health: Double?, cycles: Int?)? in
+            guard let day = days.date(fromKey: row.text(0)) else { return nil }
+            return (day, row.int(2) > 0 ? row.double(1) : nil, row.int(4) > 0 ? Int(row.int(3)) : nil)
+        }.compactMap { $0 }
+    }
+
+    /// Lowest free disk space per day over the last `count` days and the disk size.
+    public func diskDaily(days count: Int, before end: Date) throws -> (daily: [(day: Date, free: Double)], total: Double) {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let to = days.startOfDay(end)
+        let from = days.addingDays(-(count - 1), to: to)
+        var total: Double = 0
+        let daily = try db.query(
+            """
+            SELECT day, MIN(disk_free), MAX(disk_total) FROM system_samples
+            WHERE day BETWEEN ? AND ? AND disk_total > 0 GROUP BY day ORDER BY day
+            """, [.text(days.key(from)), .text(days.key(to))]
+        ) { row -> (day: Date, free: Double)? in
+            total = max(total, row.double(2))
+            return days.date(fromKey: row.text(0)).map { ($0, row.double(1)) }
+        }.compactMap { $0 }
+        return (daily, total)
+    }
+
+    /// Highest swap use per day.
+    public func swapDaily(from: Date, to: Date) throws -> [(day: Date, peak: Double)] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return try db.query(
+            "SELECT day, MAX(swap_used) FROM system_samples WHERE day BETWEEN ? AND ? GROUP BY day ORDER BY day",
+            [.text(days.key(from)), .text(days.key(to))]
+        ) { row -> (day: Date, peak: Double)? in
+            days.date(fromKey: row.text(0)).map { ($0, row.double(1)) }
+        }.compactMap { $0 }
     }
 
     // MARK: - Reports

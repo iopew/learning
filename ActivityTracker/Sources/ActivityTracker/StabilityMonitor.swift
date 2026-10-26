@@ -63,6 +63,18 @@ final class StabilityMonitor: ObservableObject {
         }
     }
 
+    /// A process the watchdog caught working hard while the user was away.
+    func recordRunaway(name: String, percent: Int, minutes: TimeInterval, at: Date) {
+        queue.async { [self] in
+            let event = StabilityEvent(
+                source: "watchdog-\(name)-\(Int(at.timeIntervalSince1970))", at: at, kind: .resource, name: name,
+                detail: L.tr("\(percent)% процессора \(Format.duration(minutes)), пока тебя не было",
+                             "\(percent)% CPU for \(Format.duration(minutes)) while you were away"))
+            _ = try? store?.add([event])
+            reload()
+        }
+    }
+
     /// Clean-up of old history.
     func erase(before moment: Date) {
         queue.async { [self] in

@@ -17,12 +17,17 @@ final class StatsModel: ObservableObject {
     @Published private(set) var lastHourSwitches: Int?
     @Published private(set) var usualSwitchesPerHour: Double?
     @Published private(set) var network: NetworkReport?
+    /// Battery and System pane details; only for the main window and saved databases (not the menu bar window).
+    @Published private(set) var machine: MachineReport?
     @Published private(set) var error: String?
 
     let days: DayCalendar
     private let store: ActivityStore
     private let systemStore: SystemStore
     private let networkStore: NetworkStore
+    private let machineStore: MachineStore?
+    /// The wear and disk forecasts look at the whole history: once a day. Only touched on `queue`.
+    private var forecastCache: (day: String, battery: BatteryForecast, disk: DiskForecast?)?
     private let queue = DispatchQueue(label: "ActivityTracker.stats", qos: .userInitiated)
     private var generation = 0
     private var lastLoad = Date.distantPast
@@ -34,10 +39,12 @@ final class StatsModel: ObservableObject {
     private var switchBaselineCache: (day: String, perHour: Double?)?
 
     /// `anchor`: start on this day instead of today (a saved database: its last recorded day).
-    init(store: ActivityStore, systemStore: SystemStore, networkStore: NetworkStore, anchor: Date? = nil) {
+    init(store: ActivityStore, systemStore: SystemStore, networkStore: NetworkStore, machineStore: MachineStore? = nil,
+         anchor: Date? = nil) {
         self.store = store
         self.systemStore = systemStore
         self.networkStore = networkStore
+        self.machineStore = machineStore
         self.days = store.days
         if let anchor {
             self.anchor = anchor
@@ -76,14 +83,20 @@ final class StatsModel: ObservableObject {
                 let tips = try todayTips(dayReport: sameDay ? report : nil, daySystem: sameDay ? system : nil)
                 var loaded = Loaded(report: report, system: system, tips: tips)
                 loaded.network = try networkStore.report(range: request.range, anchor: request.anchor)
+                var spans: [ActivityEvent]?
                 if let length = request.range.days, length <= 30 {
-                    let spans = try store.spans(from: report.fromDay, to: report.toDay)
+                    spans = try store.spans(from: report.fromDay, to: report.toDay)
+                }
+                if let spans {
                     loaded.switches = Switches.stats(spans)
                     if sameDay {
                         let now = Date()
                         loaded.lastHour = Switches.stats(Switches.clip(spans, from: now.addingTimeInterval(-3600), to: now)).switches
                         loaded.usualPerHour = try switchBaseline(today: report.toDay)
                     }
+                }
+                if let machineStore {
+                    loaded.machine = try machineReport(machineStore, from: report.fromDay, to: report.toDay, spans: spans)
                 }
                 return loaded
             }
@@ -98,6 +111,7 @@ final class StatsModel: ObservableObject {
                     self.lastHourSwitches = loaded.lastHour
                     self.usualSwitchesPerHour = loaded.usualPerHour
                     self.network = loaded.network
+                    self.machine = loaded.machine
                     self.error = nil
                 case .failure(let error):
                     self.error = L.tr("Не удалось построить отчёт: \(error)", "Could not build the report: \(error)")
@@ -114,6 +128,31 @@ final class StatsModel: ObservableObject {
         var lastHour: Int?
         var usualPerHour: Double?
         var network: NetworkReport?
+        var machine: MachineReport?
+    }
+
+    /// Runs on `queue`.
+    private func machineReport(_ machineStore: MachineStore, from: Date, to: Date, spans: [ActivityEvent]?) throws -> MachineReport {
+        var report = MachineReport()
+        if let spans {
+            report.costs = BatteryCost.make(minutes: try systemStore.batteryMinutes(from: from, to: to), events: spans)
+        }
+        report.charges = try systemStore.chargeSessions(from: from, to: to)
+        report.nights = try machineStore.nights(from: from, to: to)
+        report.blockers = try machineStore.blockers(from: from, to: to)
+        report.folders = try machineStore.folders()
+        report.writes = try machineStore.writes(from: from, to: to)
+        report.swapDaily = try systemStore.swapDaily(from: from, to: to)
+        report.startup = try machineStore.startupItems(now: Date())
+        let key = days.key(Date())
+        if forecastCache?.day != key {
+            let battery = BatteryForecast.make(daily: try systemStore.batteryHistory(), now: Date())
+            let disk = try systemStore.diskDaily(days: 30, before: Date())
+            forecastCache = (key, battery, disk.total > 0 ? DiskForecast.make(daily: disk.daily, total: disk.total) : nil)
+        }
+        report.forecast = forecastCache?.battery
+        report.disk = forecastCache?.disk
+        return report
     }
 
     /// Runs on `queue`. Computed once a day from the previous 14 days.

@@ -23,6 +23,9 @@ public struct SystemSample: Equatable {
     public var diskTotal: Double
     /// ProcessInfo.ThermalState raw value: 0 nominal, 1 fair, 2 serious, 3 critical.
     public var thermalState: Int
+    /// The power adapter, when plugged in (IOPSCopyExternalPowerAdapterDetails).
+    public var adapterWatts: Double?
+    public var adapterName: String?
 
     public init(at: Date, batteryPercent: Double? = nil, onAC: Bool = true, isCharging: Bool = false,
                 batteryWatts: Double? = nil, batteryTemperature: Double? = nil, cycleCount: Int? = nil,
