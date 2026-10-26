@@ -17,6 +17,8 @@ final class StatsModel: ObservableObject {
     @Published private(set) var lastHourSwitches: Int?
     @Published private(set) var usualSwitchesPerHour: Double?
     @Published private(set) var network: NetworkReport?
+    /// The day in words (day view only).
+    @Published private(set) var daySummary: [String] = []
     /// Battery and System pane details; only for the main window and saved databases (not the menu bar window).
     @Published private(set) var machine: MachineReport?
     @Published private(set) var error: String?
@@ -95,6 +97,10 @@ final class StatsModel: ObservableObject {
                         loaded.usualPerHour = try switchBaseline(today: report.toDay)
                     }
                 }
+                if request.range == .day {
+                    loaded.daySummary = DaySummary.make(report: report, switches: loaded.switches,
+                                                        usualPerHour: loaded.usualPerHour, days: days)
+                }
                 if let machineStore {
                     loaded.machine = try machineReport(machineStore, from: report.fromDay, to: report.toDay, spans: spans)
                 }
@@ -112,6 +118,7 @@ final class StatsModel: ObservableObject {
                     self.usualSwitchesPerHour = loaded.usualPerHour
                     self.network = loaded.network
                     self.machine = loaded.machine
+                    self.daySummary = loaded.daySummary
                     self.error = nil
                 case .failure(let error):
                     self.error = L.tr("Не удалось построить отчёт: \(error)", "Could not build the report: \(error)")
@@ -129,6 +136,7 @@ final class StatsModel: ObservableObject {
         var usualPerHour: Double?
         var network: NetworkReport?
         var machine: MachineReport?
+        var daySummary: [String] = []
     }
 
     /// Runs on `queue`.

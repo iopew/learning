@@ -43,6 +43,8 @@ final class Settings: ObservableObject {
     private let defaults: UserDefaults
 
     @Published var isPaused: Bool { didSet { defaults.set(isPaused, forKey: Keys.isPaused) } }
+    /// A timed pause ends at this moment (nil: until "Продолжить").
+    @Published var pauseUntil: Date? { didSet { defaults.set(pauseUntil?.timeIntervalSince1970, forKey: Keys.pauseUntil) } }
     /// After this many seconds without keyboard/mouse input the user counts as away.
     @Published var idleThreshold: TimeInterval { didSet { defaults.set(idleThreshold, forKey: Keys.idleThreshold) } }
     /// Video playing or a call in progress (display kept awake) counts as activity even without input.
@@ -104,6 +106,7 @@ final class Settings: ObservableObject {
 
     private enum Keys {
         static let isPaused = "isPaused"
+        static let pauseUntil = "pauseUntil"
         static let idleThreshold = "idleThreshold"
         static let countMedia = "countMediaAsActive"
         static let recordTitles = "recordTitles"
@@ -146,6 +149,7 @@ final class Settings: ObservableObject {
             Keys.watchdogAlerts: true,
         ])
         isPaused = defaults.bool(forKey: Keys.isPaused)
+        pauseUntil = (defaults.object(forKey: Keys.pauseUntil) as? Double).map { Date(timeIntervalSince1970: $0) }
         idleThreshold = defaults.double(forKey: Keys.idleThreshold)
         countMediaAsActive = defaults.bool(forKey: Keys.countMedia)
         recordTitles = defaults.bool(forKey: Keys.recordTitles)

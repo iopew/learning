@@ -105,7 +105,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// A saved database dropped on the app icon or opened with "Open With".
     func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls where url.pathExtension.lowercased() == "sqlite" { ArchiveSession.open(url) }
+        for url in urls {
+            if url.scheme == "activitytracker" {
+                CLI.handle(url: url)
+            } else if url.pathExtension.lowercased() == "sqlite" {
+                ArchiveSession.open(url)
+            }
+        }
     }
 
     /// Double-click in Finder / Launchpad / Dock while already running.
@@ -282,7 +288,12 @@ struct MainWindowView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     UpdateBanner()
                     StatsControls()
+                    HStack {
+                        Spacer()
+                        ExportMenu()
+                    }
                     if let report = stats.report {
+                        DaySummaryCard(lines: stats.daySummary)
                         ReportOverview(report: report, style: .wide)
                         if let switches = stats.switches {
                             SwitchesCard(stats: switches, lastHour: stats.lastHourSwitches,

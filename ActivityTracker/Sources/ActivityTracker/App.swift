@@ -119,6 +119,9 @@ struct ActivityTrackerApp: App {
         }
 
         // Command-line modes: do one job and exit, without any UI.
+        if let index = arguments.firstIndex(of: "--cli") {
+            exit(CLI.run(Array(arguments[(index + 1)...])))
+        }
         if arguments.contains("--probe") {
             exit(Probe.run())
         }
@@ -168,6 +171,7 @@ struct ActivityTrackerApp: App {
             notifier?.trackerTicked(state: state, bundleID: bundleID, now: now)
         }
         services.notifier.start()
+        CLI.listen()
         services.stability.start()
         services.network.start()
         services.machine.start()

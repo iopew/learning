@@ -38,6 +38,7 @@ struct PopoverView: View {
                         }
                         StatsControls()
                         if let report = stats.report {
+                            DaySummaryCard(lines: stats.daySummary)
                             ReportOverview(report: report, style: .compact)
                             if let switches = stats.switches {
                                 SwitchesCard(stats: switches, lastHour: stats.lastHourSwitches,
@@ -299,12 +300,40 @@ struct PauseButton: View {
     @EnvironmentObject private var settings: Settings
 
     var body: some View {
-        Button {
-            tracker.setPaused(!settings.isPaused)
-        } label: {
-            Label(settings.isPaused ? L.tr("Продолжить", "Resume") : L.tr("Пауза", "Pause"),
-                  systemImage: settings.isPaused ? "play.fill" : "pause.fill")
+        if settings.isPaused {
+            Button {
+                tracker.setPaused(false)
+            } label: {
+                Label(pausedTitle, systemImage: "play.fill")
+            }
+        } else {
+            Menu {
+                Button(L.tr("На 15 минут", "For 15 minutes")) { pause(minutes: 15) }
+                Button(L.tr("На 30 минут", "For 30 minutes")) { pause(minutes: 30) }
+                Button(L.tr("На час", "For an hour")) { pause(minutes: 60) }
+                Button(L.tr("До завтра", "Until tomorrow")) {
+                    let days = AppServices.shared.days
+                    tracker.setPaused(true, until: days.addingDays(1, to: days.startOfDay(Date())))
+                }
+            } label: {
+                Label(L.tr("Пауза", "Pause"), systemImage: "pause.fill")
+            } primaryAction: {
+                tracker.setPaused(true)
+            }
+            .fixedSize()
         }
+    }
+
+    private func pause(minutes: Double) {
+        tracker.setPaused(true, until: Date().addingTimeInterval(minutes * 60))
+    }
+
+    /// "Продолжить (пауза до 14:30)".
+    private var pausedTitle: String {
+        guard let until = settings.pauseUntil else { return L.tr("Продолжить", "Resume") }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return L.tr("Продолжить (пауза до \(formatter.string(from: until)))", "Resume (paused until \(formatter.string(from: until)))")
     }
 }
 

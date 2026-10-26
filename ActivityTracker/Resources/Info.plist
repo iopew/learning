@@ -30,6 +30,17 @@
     <string>public.app-category.productivity</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>ActivityTracker читает адрес открытой вкладки, чтобы считать время на сайтах. Данные остаются только на этом Mac. / ActivityTracker reads the open tab's address to count time per site. Data stays on this Mac.</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.iopew.ActivityTracker</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>activitytracker</string>
+            </array>
+        </dict>
+    </array>
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>

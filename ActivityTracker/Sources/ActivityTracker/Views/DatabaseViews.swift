@@ -324,6 +324,7 @@ struct ArchiveView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     StatsControls()
                     if let report = stats.report {
+                        DaySummaryCard(lines: stats.daySummary)
                         ReportOverview(report: report, style: .wide)
                         if let switches = stats.switches {
                             SwitchesCard(stats: switches, usualPerHour: nil)

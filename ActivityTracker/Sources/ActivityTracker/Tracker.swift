@@ -71,7 +71,9 @@ final class Tracker: ObservableObject {
         NotificationCenter.default.post(name: .activityDataChanged, object: nil)
     }
 
-    func setPaused(_ paused: Bool) {
+    /// `until`: resume by itself then (pause for 30 minutes, until tomorrow).
+    func setPaused(_ paused: Bool, until: Date? = nil) {
+        settings.pauseUntil = paused ? until : nil
         settings.isPaused = paused
         tick()
     }
@@ -83,6 +85,10 @@ final class Tracker: ObservableObject {
             onTick?(state, current?.bundleID, now)
         }
 
+        if settings.isPaused, let until = settings.pauseUntil, now >= until {
+            settings.pauseUntil = nil
+            settings.isPaused = false
+        }
         if settings.isPaused { return pause(.paused, at: now) }
         if screenLocked || asleep { return pause(.away, at: now) }
 

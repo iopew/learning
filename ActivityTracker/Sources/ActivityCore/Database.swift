@@ -17,8 +17,9 @@ enum SQLValue {
 final class Database {
     private var handle: OpaquePointer?
 
-    init(path: String) throws {
-        let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
+    /// `readOnly`: for the `sql` command line, so a typo can't change anything.
+    init(path: String, readOnly: Bool = false) throws {
+        let flags = (readOnly ? SQLITE_OPEN_READONLY : SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE) | SQLITE_OPEN_FULLMUTEX
         guard sqlite3_open_v2(path, &handle, flags, nil) == SQLITE_OK else {
             let message = handle.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown error"
             sqlite3_close(handle)
@@ -37,6 +38,25 @@ final class Database {
     var changes: Int { Int(sqlite3_changes(handle)) }
 
     /// Column names of a table (for schema upgrades).
+    /// Runs any query and returns the column names and rows as text (for the `sql` command).
+    func rawQuery(_ sql: String) throws -> (columns: [String], rows: [[String]]) {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else { throw lastError() }
+        defer { sqlite3_finalize(statement) }
+        let count = sqlite3_column_count(statement)
+        let columns = (0..<count).map { String(cString: sqlite3_column_name(statement, $0)) }
+        var rows: [[String]] = []
+        while true {
+            let code = sqlite3_step(statement)
+            if code == SQLITE_DONE { break }
+            guard code == SQLITE_ROW else { throw lastError() }
+            rows.append((0..<count).map { column in
+                sqlite3_column_text(statement, column).map { String(cString: $0) } ?? "NULL"
+            })
+        }
+        return (columns, rows)
+    }
+
     func columns(of table: String) throws -> Set<String> {
         Set(try query("PRAGMA table_info(\(table))") { $0.text(1) })
     }

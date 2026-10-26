@@ -51,6 +51,23 @@ public final class ActivityStore {
             );
             """)
         try Self.upgradeTexts(db)
+        // Readable views for own SQL and programs (see docs: "Данные наружу").
+        try db.execute("""
+            CREATE VIEW IF NOT EXISTS activity AS
+                SELECT e.id, e.day, datetime(e.start_at, 'unixepoch', 'localtime') AS started,
+                       datetime(e.end_at, 'unixepoch', 'localtime') AS ended, e.end_at - e.start_at AS seconds,
+                       e.bundle_id, e.app, COALESCE(t.value, '') AS title, COALESCE(u.value, '') AS url, e.domain
+                FROM events e LEFT JOIN texts t ON t.id = e.title_id LEFT JOIN texts u ON u.id = e.url_id;
+            CREATE VIEW IF NOT EXISTS daily_apps AS
+                SELECT day, app, bundle_id, SUM(end_at - start_at) AS seconds FROM events GROUP BY day, bundle_id;
+            CREATE VIEW IF NOT EXISTS daily_sites AS
+                SELECT day, domain, SUM(end_at - start_at) AS seconds FROM events WHERE domain != '' GROUP BY day, domain;
+            """)
+    }
+
+    /// Read-only access to the database file for the `sql` command line.
+    public static func query(databaseAt path: String, sql: String) throws -> (columns: [String], rows: [[String]]) {
+        try Database(path: path, readOnly: true).rawQuery(sql)
     }
 
     /// Before build 17 every event stored its window title and URL in full, although the same ones repeat
@@ -316,6 +333,24 @@ public final class ActivityStore {
                 end: Date(timeIntervalSince1970: row.double(2)),
                 bundleID: row.text(3), appName: row.text(4), title: row.text(5), url: row.text(6),
                 domain: row.text(7))
+        }
+    }
+
+    /// All events of the days `from`…`to` with titles and addresses (export).
+    public func events(from: Date, to: Date) throws -> [ActivityEvent] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return try db.query(
+            """
+            SELECT e.id, e.start_at, e.end_at, e.bundle_id, e.app, COALESCE(t.value, ''), COALESCE(u.value, ''), e.domain
+            FROM events e LEFT JOIN texts t ON t.id = e.title_id LEFT JOIN texts u ON u.id = e.url_id
+            WHERE e.day BETWEEN ? AND ? ORDER BY e.start_at
+            """, [.text(days.key(from)), .text(days.key(to))]
+        ) { row in
+            ActivityEvent(
+                id: row.int(0), start: Date(timeIntervalSince1970: row.double(1)), end: Date(timeIntervalSince1970: row.double(2)),
+                bundleID: row.text(3), appName: row.text(4), title: row.text(5), url: row.text(6), domain: row.text(7))
         }
     }
 
