@@ -12,7 +12,7 @@ import ActivityCore
 ///   the Wi-Fi link rate and signal, and a ping (3 packets) to the router and to 1.1.1.1.
 /// No speed tests: nothing is downloaded on purpose. The pings are ~100 KB a day.
 final class NetworkMonitor: NSObject, CLLocationManagerDelegate {
-    static let tick: TimeInterval = 5
+    static let tick: TimeInterval = TrafficCounter.tick
     static let minute: TimeInterval = 60
     /// A 5-second window above this counts as "transferring" (for the average speed).
     static let busyRate: Double = 50_000
@@ -101,9 +101,9 @@ final class NetworkMonitor: NSObject, CLLocationManagerDelegate {
             var tx: Double = 0
             for (name, value) in current {
                 guard let old = counters[name] else { continue }
-                // 32-bit counters wrap around at 4 GB: the subtraction wraps as well.
-                rx += Double(value.rx &- old.rx)
-                tx += Double(value.tx &- old.tx)
+                // 32-bit counters wrap at 4 GB, and restart when an interface is recreated (an iPhone plugged in).
+                rx += TrafficCounter.delta(old: old.rx, new: value.rx, elapsed: elapsed)
+                tx += TrafficCounter.delta(old: old.tx, new: value.tx, elapsed: elapsed)
             }
             // After sleep the window is long; its speed would be meaningless.
             if elapsed > 0, elapsed <= Self.tick * 3 {
@@ -131,24 +131,39 @@ final class NetworkMonitor: NSObject, CLLocationManagerDelegate {
         }
     }
 
-    /// Bytes in/out since boot of the physical interfaces (no loopback, no VPN tunnels: those repeat the traffic).
+    /// Bytes in/out since boot of the physical interfaces that carry a network: no loopback, no VPN tunnels (they
+    /// repeat the traffic), and no links without a routable address — like the cable link Xcode and Finder use to
+    /// talk to an iPhone (only fe80:: addresses), whose gigabytes of device files are not internet traffic.
     static func readCounters() -> [String: (rx: UInt32, tx: UInt32)] {
-        var result: [String: (rx: UInt32, tx: UInt32)] = [:]
+        var counters: [String: (rx: UInt32, tx: UInt32)] = [:]
+        var routable: Set<String> = []
         var list: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&list) == 0, let first = list else { return result }
+        guard getifaddrs(&list) == 0, let first = list else { return counters }
         defer { freeifaddrs(list) }
         var pointer: UnsafeMutablePointer<ifaddrs>? = first
         while let entry = pointer {
             defer { pointer = entry.pointee.ifa_next }
-            guard let address = entry.pointee.ifa_addr, address.pointee.sa_family == UInt8(AF_LINK),
-                  let data = entry.pointee.ifa_data
-            else { continue }
+            guard let address = entry.pointee.ifa_addr else { continue }
             let name = String(cString: entry.pointee.ifa_name)
             guard name.hasPrefix("en") || name.hasPrefix("pdp_ip") else { continue }
-            let stats = data.assumingMemoryBound(to: if_data.self).pointee
-            result[name] = (stats.ifi_ibytes, stats.ifi_obytes)
+            switch Int32(address.pointee.sa_family) {
+            case AF_LINK:
+                guard let data = entry.pointee.ifa_data else { continue }
+                let stats = data.assumingMemoryBound(to: if_data.self).pointee
+                counters[name] = (stats.ifi_ibytes, stats.ifi_obytes)
+            case AF_INET:
+                let ip = address.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { UInt32(bigEndian: $0.pointee.sin_addr.s_addr) }
+                if ip >> 16 != 0xA9FE { routable.insert(name) }   // 169.254.x.x: no network behind it
+            case AF_INET6:
+                let linkLocal = address.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) {
+                    $0.pointee.sin6_addr.__u6_addr.__u6_addr8.0 == 0xFE && ($0.pointee.sin6_addr.__u6_addr.__u6_addr8.1 & 0xC0) == 0x80
+                }
+                if !linkLocal { routable.insert(name) }
+            default:
+                break
+            }
         }
-        return result
+        return counters.filter { routable.contains($0.key) }
     }
 
     // MARK: - The minute

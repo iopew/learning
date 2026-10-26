@@ -160,6 +160,29 @@ public final class NetworkStore {
                 ALTER TABLE network_samples ADD COLUMN outage_count INTEGER;
                 """)
         }
+        try removeCounterResetSpikes()
+    }
+
+    /// Before build 30 a byte counter that restarted (an interface recreated, e.g. an iPhone plugged in) was taken
+    /// for a 32-bit wrap: ~4 GB "in 5 seconds" (~7 Gbit/s). Such minutes have an impossible peak; the spike (peak × 5 s) is taken
+    /// out of their traffic and busy time. Rows without such a peak are untouched, so this runs at every start.
+    func removeCounterResetSpikes() throws {
+        let cap = TrafficCounter.maximumRate
+        let tick = TrafficCounter.tick
+        try db.execute("""
+            UPDATE network_samples SET
+                rx = MAX(0, rx - peak_rx * \(tick)),
+                busy_rx_bytes = MAX(0, busy_rx_bytes - peak_rx * \(tick)),
+                busy_rx_seconds = MAX(0, busy_rx_seconds - \(tick)),
+                peak_rx = MIN(peak_rx, MAX(0, rx - peak_rx * \(tick)) / \(tick))
+            WHERE peak_rx > \(cap);
+            UPDATE network_samples SET
+                tx = MAX(0, tx - peak_tx * \(tick)),
+                busy_tx_bytes = MAX(0, busy_tx_bytes - peak_tx * \(tick)),
+                busy_tx_seconds = MAX(0, busy_tx_seconds - \(tick)),
+                peak_tx = MIN(peak_tx, MAX(0, tx - peak_tx * \(tick)) / \(tick))
+            WHERE peak_tx > \(cap);
+            """)
     }
 
     /// Minutes before `moment` become one row per hour and network: traffic, busy time, peaks and outages stay
@@ -432,3 +455,27 @@ public enum PingOutput {
         return (average, loss)
     }
 }
+
+/// Turns two readings of an interface's 32-bit byte counter into bytes moved.
+public enum TrafficCounter {
+    /// Seconds between readings (the network monitor's tick).
+    public static let tick: Double = 5
+    /// 2.5 Gbit/s: above what Wi-Fi 6E or 2.5G Ethernet deliver in practice. It must stay well below 4 GB per tick:
+    /// a restarted counter looks like "4 GB in 5 s" (~7 Gbit/s), and only a cap under that tells it from a wrap.
+    public static let maximumRate: Double = 312_500_000
+
+    /// A smaller new value is a 32-bit wrap only if the bytes that implies are possible in `elapsed`; otherwise the
+    /// counter restarted (interface recreated) and only the new value counts. Impossible jumps count as nothing.
+    public static func delta(old: UInt32, new: UInt32, elapsed: Double) -> Double {
+        let limit = maximumRate * max(elapsed, 1)
+        let bytes: Double
+        if new >= old {
+            bytes = Double(new - old)
+        } else {
+            let wrapped = Double(UInt32.max - old) + 1 + Double(new)
+            bytes = wrapped <= limit ? wrapped : Double(new)
+        }
+        return bytes <= limit ? bytes : 0
+    }
+}
+
