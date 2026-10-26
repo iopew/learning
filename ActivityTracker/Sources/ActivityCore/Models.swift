@@ -112,6 +112,8 @@ public struct Report: Equatable {
     /// 1440 entries, one per minute of the day; nil where nothing was recorded.
     public var minutes: [MinuteCell?]
     public var sessions: [Session]
+    /// Clock hour of the first row of `hourly` / `minutes` (the day may begin at 04:00, see DayCalendar).
+    public var firstHour: Int = 0
 
     public var averagePerActiveDay: TimeInterval {
         activeDays > 0 ? total / Double(activeDays) : 0

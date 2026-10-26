@@ -99,6 +99,39 @@ public final class ActivityStore {
         }
     }
 
+    /// Recomputes every event's day after the day boundary (DayCalendar.startHour) changed. Returns rows moved.
+    /// Call before recording starts.
+    @discardableResult
+    public func rekeyDays() throws -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+
+        open = nil
+        return try Self.rekey(db: db, table: "events", idColumn: "id", timeColumn: "start_at", days: days)
+    }
+
+    /// Shared by the activity and system tables: `day` = key of the row's time, updated only where it differs.
+    static func rekey(db: Database, table: String, idColumn: String, timeColumn: String, days: DayCalendar) throws -> Int {
+        let rows = try db.query("SELECT \(idColumn), \(timeColumn), day FROM \(table)") {
+            ($0.int(0), $0.double(1), $0.text(2))
+        }
+        var moved = 0
+        try db.execute("BEGIN")
+        do {
+            for (id, time, day) in rows {
+                let key = days.key(Date(timeIntervalSince1970: time))
+                guard key != day else { continue }
+                try db.run("UPDATE \(table) SET day = ? WHERE \(idColumn) = ?", [.text(key), .int(id)])
+                moved += 1
+            }
+            try db.execute("COMMIT")
+        } catch {
+            try? db.execute("ROLLBACK")
+            throw error
+        }
+        return moved
+    }
+
     private func updateEnd(of event: OpenEvent) throws {
         try db.run("UPDATE events SET end_at = ? WHERE id = ?",
                    [.double(event.end.timeIntervalSince1970), .int(event.id)])
@@ -190,6 +223,107 @@ public final class ActivityStore {
         }
     }
 
+    /// Events of the days `from`…`to` without titles and URLs (lighter): for switches and streaks.
+    public func spans(from: Date, to: Date) throws -> [ActivityEvent] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return try db.query(
+            "SELECT id, start_at, end_at, bundle_id, app FROM events WHERE day BETWEEN ? AND ? ORDER BY start_at",
+            [.text(days.key(from)), .text(days.key(to))]
+        ) { row in
+            ActivityEvent(
+                id: row.int(0),
+                start: Date(timeIntervalSince1970: row.double(1)),
+                end: Date(timeIntervalSince1970: row.double(2)),
+                bundleID: row.text(3), appName: row.text(4), title: "", url: "", domain: "")
+        }
+    }
+
+    /// First start, last end and total of every recorded day in `from`…`to` (rhythm, year calendar).
+    public func dayStats(from: Date, to: Date) throws -> [DayStat] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return try db.query(
+            """
+            SELECT day, MIN(start_at), MAX(end_at), SUM(end_at - start_at) FROM events
+            WHERE day BETWEEN ? AND ? GROUP BY day ORDER BY day
+            """, [.text(days.key(from)), .text(days.key(to))]
+        ) { row -> DayStat? in
+            guard let day = days.date(fromKey: row.text(0)) else { return nil }
+            return DayStat(day: day, first: Date(timeIntervalSince1970: row.double(1)),
+                           last: Date(timeIntervalSince1970: row.double(2)), seconds: row.double(3))
+        }.compactMap { $0 }
+    }
+
+    /// Time per app and per site for every day in `from`…`to` (period comparison).
+    public func dailyUsage(from: Date, to: Date) throws -> [DayUsage] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let window: [SQLValue] = [.text(days.key(from)), .text(days.key(to))]
+        var result: [String: DayUsage] = [:]
+        func entry(_ key: String) -> DayUsage? {
+            if let existing = result[key] { return existing }
+            return days.date(fromKey: key).map { DayUsage(day: $0) }
+        }
+        for (key, bundleID, name, seconds) in try db.query(
+            "SELECT day, bundle_id, MAX(app), SUM(end_at - start_at) FROM events WHERE day BETWEEN ? AND ? GROUP BY day, bundle_id",
+            window, map: { ($0.text(0), $0.text(1), $0.text(2), $0.double(3)) }) {
+            guard var usage = entry(key) else { continue }
+            usage.apps[bundleID] = seconds
+            usage.appNames[bundleID] = name
+            usage.total += seconds
+            result[key] = usage
+        }
+        for (key, domain, seconds) in try db.query(
+            "SELECT day, domain, SUM(end_at - start_at) FROM events WHERE day BETWEEN ? AND ? AND domain != '' GROUP BY day, domain",
+            window, map: { ($0.text(0), $0.text(1), $0.double(2)) }) {
+            guard var usage = entry(key) else { continue }
+            usage.domains[domain] = seconds
+            result[key] = usage
+        }
+        return result.values.sorted { $0.day < $1.day }
+    }
+
+    /// Seconds per day for one app or site, and its most-used titles, over `from`…`to` (trend card).
+    public func usageHistory(of target: UsageTarget, from: Date, to: Date) throws -> (daily: [String: TimeInterval], titles: [TitleUsage]) {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let column: String
+        let value: String
+        switch target {
+        case .app(let bundleID):
+            column = "bundle_id"
+            value = bundleID
+        case .domain(let domain):
+            column = "domain"
+            value = domain
+        }
+        let params: [SQLValue] = [.text(days.key(from)), .text(days.key(to)), .text(value)]
+        var daily: [String: TimeInterval] = [:]
+        for (day, seconds) in try db.query(
+            "SELECT day, SUM(end_at - start_at) FROM events WHERE day BETWEEN ? AND ? AND \(column) = ? GROUP BY day",
+            params, map: { ($0.text(0), $0.double(1)) }) {
+            daily[day] = seconds
+        }
+        let raw = try db.query(
+            """
+            SELECT title, SUM(end_at - start_at) AS seconds FROM events
+            WHERE day BETWEEN ? AND ? AND \(column) = ? AND title != ''
+            GROUP BY title ORDER BY seconds DESC LIMIT 60
+            """, params
+        ) { (TitleCleaner.clean($0.text(0)), $0.double(1)) }
+        // Titles that differ only by a notification counter ("(3) …") are one title.
+        var merged: [String: TimeInterval] = [:]
+        for (title, seconds) in raw where !title.isEmpty { merged[title, default: 0] += seconds }
+        let titles = merged.sorted { $0.value > $1.value || ($0.value == $1.value && $0.key < $1.key) }
+            .prefix(10).map { TitleUsage(title: $0.key, seconds: $0.value) }
+        return (daily, titles)
+    }
+
     // MARK: - Reports
 
     /// The usual day over the `count` days before `day`, averaged over the days that had any activity.
@@ -277,7 +411,7 @@ public final class ActivityStore {
             total: daily.values.reduce(0, +),
             activeDays: daily.values.filter { $0 > 0 }.count,
             apps: apps, domains: domains, buckets: buckets, bucketUnit: unit,
-            hourly: [], minutes: [], sessions: [])
+            hourly: [], minutes: [], sessions: [], firstHour: days.startHour)
 
         if range == .day {
             let events = try eventsLocked(dayKey: days.key(toDay))

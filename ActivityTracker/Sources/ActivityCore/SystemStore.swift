@@ -59,6 +59,19 @@ public final class SystemStore {
         lastOnAC = try db.query("SELECT on_ac FROM system_samples ORDER BY at DESC LIMIT 1") { $0.int(0) != 0 }.first
     }
 
+    /// Recomputes the day of every row after the day boundary changed (see ActivityStore.rekeyDays).
+    @discardableResult
+    public func rekeyDays() throws -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+
+        var moved = 0
+        for (table, time) in [("system_samples", "at"), ("app_energy_hourly", "hour"), ("charge_events", "at")] {
+            moved += try ActivityStore.rekey(db: db, table: table, idColumn: "rowid", timeColumn: time, days: days)
+        }
+        return moved
+    }
+
     // MARK: - Recording
 
     /// Stores one snapshot (`interval` = seconds it stands for) and the per-app energy of that interval.

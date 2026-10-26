@@ -103,7 +103,7 @@ public enum Recommendations {
         }
 
         // 4. Late night.
-        let night = lateNight(minutes: today.minutes)
+        let night = lateNight(minutes: today.minutes, firstHour: today.firstHour)
         if night >= 20 * 60 {
             tips.append(Recommendation(
                 id: "late-night", kind: .info, symbol: "moon.stars",
@@ -243,8 +243,13 @@ public enum Recommendations {
         return TimeInterval(active * 60)
     }
 
-    /// Seconds of activity between 00:00 and 05:00.
-    static func lateNight(minutes: [MinuteCell?]) -> TimeInterval {
-        minutes.prefix(5 * 60).reduce(0) { $0 + ($1?.seconds ?? 0) }
+    /// Seconds of activity between 00:00 and 05:00 by the clock. `minutes[0]` is `firstHour`:00 (the day may begin
+    /// at 04:00, then the night is the tail of the day plus its first hour).
+    static func lateNight(minutes: [MinuteCell?], firstHour: Int = 0) -> TimeInterval {
+        var total: TimeInterval = 0
+        for (index, cell) in minutes.enumerated() where (index / 60 + firstHour) % 24 < 5 {
+            total += cell?.seconds ?? 0
+        }
+        return total
     }
 }
