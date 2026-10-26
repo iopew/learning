@@ -7,6 +7,8 @@ struct SettingsView: View {
 
     @EnvironmentObject private var settings: Settings
     @State private var accessibilityGranted = WindowTitle.isTrusted
+    /// SMAppService status is an IPC call: read it on appear / every poll, not on every redraw.
+    @State private var launchAtLogin = false
     @State private var deniedBrowsers: [String] = []
     @State private var diagnosticsStatus: String?
 
@@ -43,8 +45,11 @@ struct SettingsView: View {
                 }
 
                 Toggle(L.tr("Запускать при входе в систему", "Launch at login"), isOn: Binding(
-                    get: { settings.launchAtLogin },
-                    set: { settings.launchAtLogin = $0 }))
+                    get: { launchAtLogin },
+                    set: {
+                        settings.launchAtLogin = $0
+                        launchAtLogin = settings.launchAtLogin
+                    }))
                 Toggle(L.tr("Всегда показывать значок в Dock (иначе — только пока открыто окно)", "Always show the Dock icon (otherwise only while the window is open)"),
                        isOn: $settings.alwaysShowInDock)
 
@@ -193,6 +198,7 @@ struct SettingsView: View {
 
     private func refreshPermissions() {
         accessibilityGranted = WindowTitle.isTrusted
+        launchAtLogin = settings.launchAtLogin
         deniedBrowsers = BrowserURL.lastErrors
             .filter { $0.value == BrowserURL.notPermittedError }
             .map { entry in

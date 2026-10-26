@@ -45,6 +45,7 @@ public final class ActivityStore {
                 domain TEXT NOT NULL DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS events_day ON events(day);
+            CREATE INDEX IF NOT EXISTS events_bundle_day ON events(bundle_id, day);
             CREATE TABLE IF NOT EXISTS texts(
                 id INTEGER PRIMARY KEY,
                 value TEXT NOT NULL UNIQUE
@@ -63,6 +64,23 @@ public final class ActivityStore {
             CREATE VIEW IF NOT EXISTS daily_sites AS
                 SELECT day, domain, SUM(end_at - start_at) AS seconds FROM events WHERE domain != '' GROUP BY day, domain;
             """)
+    }
+
+    /// A saved copy is safe to open if it is a plain database of reasonable size with no triggers (a crafted file
+    /// could otherwise run its own SQL logic on every change). Returns a reason when it isn't.
+    public static func archiveProblem(at path: String, maximumSize: Int64 = 4_000_000_000) -> String? {
+        let size = ((try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? NSNumber)?.int64Value ?? 0
+        if size > maximumSize { return L.tr("файл слишком большой", "the file is too large") }
+        do {
+            let db = try Database(path: path, readOnly: true)
+            let check = try db.rawQuery("PRAGMA quick_check").rows.first?.first ?? ""
+            guard check == "ok" else { return L.tr("файл повреждён", "the file is damaged") }
+            let triggers = try db.rawQuery("SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger'").rows.first?.first ?? "1"
+            guard triggers == "0" else { return L.tr("в файле есть триггеры", "the file contains triggers") }
+            return nil
+        } catch {
+            return L.tr("это не база данных (\(error))", "not a database (\(error))")
+        }
     }
 
     /// Read-only access to the database file for the `sql` command line.
@@ -178,6 +196,15 @@ public final class ActivityStore {
 
     /// Shared by the activity and system tables: `day` = key of the row's time, updated only where it differs.
     static func rekey(db: Database, table: String, idColumn: String, timeColumn: String, days: DayCalendar) throws -> Int {
+        // The app's calendar is the system one: SQLite's 'localtime' agrees with it, and one UPDATE replaces
+        // loading every row (a year of minutes would otherwise freeze the launch).
+        if days.calendar.timeZone.identifier == TimeZone.current.identifier {
+            try db.run("""
+                UPDATE \(table) SET day = date(\(timeColumn), 'unixepoch', 'localtime', '-\(days.startHour) hours')
+                WHERE day != date(\(timeColumn), 'unixepoch', 'localtime', '-\(days.startHour) hours')
+                """)
+            return db.changes
+        }
         let rows = try db.query("SELECT \(idColumn), \(timeColumn), day FROM \(table)") {
             ($0.int(0), $0.double(1), $0.text(2))
         }

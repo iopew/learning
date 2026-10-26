@@ -63,7 +63,11 @@ public enum Export {
         return try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
     }
 
-    static func csvField(_ value: String) -> String {
+    /// Quotes when needed. A value that a spreadsheet would read as a formula (=, +, -, @, tab, CR first: titles come
+    /// from web pages, e.g. `=HYPERLINK(...)`) gets a leading apostrophe, so Excel / Numbers show it as text.
+    static func csvField(_ raw: String) -> String {
+        var value = raw
+        if let first = value.first, "=+-@\t\r".contains(first) { value = "'" + value }
         guard value.contains(where: { $0 == "," || $0 == "\"" || $0 == "\n" || $0 == "\r" }) else { return value }
         return "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\""
     }
@@ -88,15 +92,30 @@ extension StatsRange {
 
 /// "30m", "2h", "90" (minutes), "tomorrow" → the moment a pause ends.
 public enum PauseLength {
+    /// The longest timed pause (a day); longer, negative, NaN or infinite values are refused.
+    public static let maximumMinutes: Double = 24 * 60
+
     public static func until(_ text: String, now: Date, days: DayCalendar) -> Date? {
         let value = text.lowercased().trimmingCharacters(in: .whitespaces)
         if value == "tomorrow" || value == "завтра" {
             return days.addingDays(1, to: days.startOfDay(now))
         }
-        if value.hasSuffix("h"), let hours = Double(value.dropLast()) { return now.addingTimeInterval(hours * 3600) }
-        if value.hasSuffix("m"), let minutes = Double(value.dropLast()) { return now.addingTimeInterval(minutes * 60) }
-        if let minutes = Double(value) { return now.addingTimeInterval(minutes * 60) }
-        return nil
+        var minutes: Double?
+        if value.hasSuffix("h") {
+            minutes = Double(value.dropLast()).map { $0 * 60 }
+        } else if value.hasSuffix("m") {
+            minutes = Double(value.dropLast())
+        } else {
+            minutes = Double(value)
+        }
+        guard let minutes = valid(minutes) else { return nil }
+        return now.addingTimeInterval(minutes * 60)
+    }
+
+    /// A pause length from outside (command line, link) in minutes, or nil if it isn't a sane number.
+    public static func valid(_ minutes: Double?) -> Double? {
+        guard let minutes, minutes.isFinite, minutes > 0, minutes <= maximumMinutes else { return nil }
+        return minutes
     }
 }
 

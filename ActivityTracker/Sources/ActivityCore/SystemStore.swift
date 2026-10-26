@@ -93,10 +93,27 @@ public final class SystemStore {
     /// drain stay exact; averages are weighted by time. Returns the number of minutes folded.
     @discardableResult
     public func rollUp(before moment: Date) throws -> Int {
+        // A day at a time, each in its own short transaction: the tracker and the reports never wait long for the
+        // lock or the database.
+        let end = (moment.timeIntervalSince1970 / 3600).rounded(.down) * 3600
+        var total = 0
+        while true {
+            let folded = try rollUpChunk(before: end)
+            if folded == 0 { break }
+            total += folded
+        }
+        return total
+    }
+
+    private func rollUpChunk(before end: Double) throws -> Int {
         lock.lock()
         defer { lock.unlock() }
 
-        let cutoff = SQLValue.double((moment.timeIntervalSince1970 / 3600).rounded(.down) * 3600)
+        guard let first = try db.query("SELECT MIN(at), COUNT(*) FROM system_samples WHERE rolled = 0 AND at < ?", [.double(end)],
+                                       map: { $0.int(1) > 0 ? $0.double(0) : nil }).first ?? nil
+        else { return 0 }
+        let chunkEnd = min(end, (first / 3600).rounded(.down) * 3600 + 86400)
+        let cutoff = SQLValue.double(chunkEnd)
         let count = try db.query("SELECT COUNT(*) FROM system_samples WHERE rolled = 0 AND at < ?", [cutoff]) { Int($0.int(0)) }.first ?? 0
         guard count > 0 else { return 0 }
         try db.execute("BEGIN")
@@ -114,7 +131,8 @@ public final class SystemStore {
                        on_ac, charging,
                        SUM(battery_watts * interval) / SUM(CASE WHEN battery_watts IS NOT NULL THEN interval END) AS battery_watts,
                        MAX(battery_temp) AS battery_temp, MAX(cycle_count) AS cycle_count, MAX(health) AS health,
-                       SUM(cpu * interval) / SUM(interval) AS cpu, SUM(mem_used * interval) / SUM(interval) AS mem_used,
+                       COALESCE(SUM(cpu * interval) / SUM(interval), 0) AS cpu,
+                       COALESCE(SUM(mem_used * interval) / SUM(interval), 0) AS mem_used,
                        MAX(mem_total) AS mem_total, MAX(swap_used) AS swap_used, MIN(disk_free) AS disk_free,
                        MAX(disk_total) AS disk_total, MAX(thermal) AS thermal,
                        SUM(CASE WHEN on_ac = 0 AND previous_ac = 0 AND dt <= 300 AND delta <= 0 THEN -delta ELSE 0 END) AS drain_pct,
@@ -259,7 +277,19 @@ public final class SystemStore {
         var sessions: [ChargeSession] = []
         let last = days.addingDays(1, to: days.startOfDay(to))
         for (index, row) in rows.enumerated() where row.plugged && row.at < last {
-            let unplug = rows[(index + 1)...].first { !$0.plugged }
+            // The unplug may come long after the window (a laptop left on the charger for days).
+            var unplug: (at: Date, percent: Double?)?
+            if let next = rows[(index + 1)...].first(where: { !$0.plugged }) {
+                unplug = (next.at, next.percent)
+            } else {
+                unplug = try db.query(
+                    "SELECT at, percent, percent IS NULL FROM charge_events WHERE at > ? AND plugged = 0 ORDER BY at LIMIT 1",
+                    [.double(row.at.timeIntervalSince1970)]
+                ) { found -> (at: Date, percent: Double?) in
+                    let percent: Double? = found.int(2) != 0 ? nil : found.double(1)
+                    return (Date(timeIntervalSince1970: found.double(0)), percent)
+                }.first
+            }
             var session = ChargeSession(start: row.at, end: unplug?.at, startPercent: row.percent,
                                         endPercent: unplug?.percent, adapterWatts: row.watts,
                                         adapterName: row.name.isEmpty ? nil : row.name, averageChargeWatts: nil)
@@ -385,14 +415,15 @@ public final class SystemStore {
         let group = span <= 1 ? "at" : (span <= 7 ? "CAST(at / 3600 AS INTEGER)" : "day")
         report.batteryPoints = try db.query(
             """
-            SELECT \(bucket), AVG(battery_percent), MIN(battery_percent), MAX(battery_percent), MAX(charging)
+            SELECT \(bucket), SUM(battery_percent * interval) / SUM(interval), MIN(battery_percent), MAX(battery_percent), MAX(charging)
             FROM system_samples WHERE \(inWindow) AND battery_percent IS NOT NULL GROUP BY \(group) ORDER BY 1
             """, window
         ) { BatteryPoint(at: Date(timeIntervalSince1970: $0.double(0)), percent: $0.double(1),
                          minPercent: $0.double(2), maxPercent: $0.double(3), charging: $0.int(4) != 0) }
         report.loadPoints = try db.query(
             """
-            SELECT \(bucket), AVG(cpu), AVG(CASE WHEN mem_total > 0 THEN mem_used / mem_total ELSE 0 END)
+            SELECT \(bucket), SUM(cpu * interval) / SUM(interval),
+                   SUM(CASE WHEN mem_total > 0 THEN mem_used / mem_total ELSE 0 END * interval) / SUM(interval)
             FROM system_samples WHERE \(inWindow) GROUP BY \(group) ORDER BY 1
             """, window
         ) { LoadPoint(at: Date(timeIntervalSince1970: $0.double(0)), cpu: $0.double(1), memory: $0.double(2)) }

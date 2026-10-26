@@ -166,10 +166,27 @@ public final class NetworkStore {
     /// exact, link / signal / ping / loss become time-weighted averages. Returns the number of minutes folded.
     @discardableResult
     public func rollUp(before moment: Date) throws -> Int {
+        // A day at a time, each in its own short transaction: the tracker and the reports never wait long for the
+        // lock or the database.
+        let end = (moment.timeIntervalSince1970 / 3600).rounded(.down) * 3600
+        var total = 0
+        while true {
+            let folded = try rollUpChunk(before: end)
+            if folded == 0 { break }
+            total += folded
+        }
+        return total
+    }
+
+    private func rollUpChunk(before end: Double) throws -> Int {
         lock.lock()
         defer { lock.unlock() }
 
-        let cutoff = SQLValue.double((moment.timeIntervalSince1970 / 3600).rounded(.down) * 3600)
+        guard let first = try db.query("SELECT MIN(at), COUNT(*) FROM network_samples WHERE rolled = 0 AND at < ?", [.double(end)],
+                                       map: { $0.int(1) > 0 ? $0.double(0) : nil }).first ?? nil
+        else { return 0 }
+        let chunkEnd = min(end, (first / 3600).rounded(.down) * 3600 + 86400)
+        let cutoff = SQLValue.double(chunkEnd)
         let count = try db.query("SELECT COUNT(*) FROM network_samples WHERE rolled = 0 AND at < ?", [cutoff]) { Int($0.int(0)) }.first ?? 0
         guard count > 0 else { return 0 }
         func average(_ column: String) -> String {
@@ -268,7 +285,11 @@ public final class NetworkStore {
         case .all:
             try db.execute("DELETE FROM network_samples; DELETE FROM networks;")
         }
-        try db.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+        // Network names (Wi-Fi names reveal places) go with their last sample.
+        try db.execute("""
+            DELETE FROM networks WHERE key NOT IN (SELECT DISTINCT network FROM network_samples);
+            PRAGMA wal_checkpoint(TRUNCATE);
+            """)
     }
 
     @discardableResult

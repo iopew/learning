@@ -81,7 +81,7 @@ struct DatabaseSection: View {
         }
     }
 
-    private func run(_ work: @escaping () throws -> String) {
+    private func run(finally: (() -> Void)? = nil, _ work: @escaping () throws -> String) {
         busy = true
         status = L.tr("Работаю…", "Working…")
         DispatchQueue.global(qos: .userInitiated).async {
@@ -92,6 +92,7 @@ struct DatabaseSection: View {
                 result = L.tr("Ошибка: \(error)", "Error: \(error)")
             }
             DispatchQueue.main.async {
+                finally?()
                 busy = false
                 status = result
                 refresh()
@@ -119,13 +120,14 @@ struct DatabaseSection: View {
     private func cleanUp(days count: Int) {
         let days = AppServices.shared.days
         let moment = days.addingDays(-count, to: days.startOfDay(Date()))
-        guard DataEraser.confirmAndErase(.before(moment)) else { return }
-        compact()
+        DataEraser.confirmAndErase(.before(moment)) { compact() }
     }
 
     private func compact() {
         let url = databaseURL
-        run {
+        // VACUUM holds the whole file: the tracker skips its writes meanwhile instead of waiting on the main thread.
+        AppServices.shared.tracker.holdWrites = true
+        run(finally: { AppServices.shared.tracker.holdWrites = false }) {
             let before = Self.fileSize(url)
             try AppServices.shared.database.compact()
             let after = Self.fileSize(url)
@@ -166,46 +168,72 @@ final class ArchiveSession: NSObject, NSWindowDelegate {
         open(url)
     }
 
+    /// Copies, checks and opens a saved database in the background; the window appears when it is ready.
     static func open(_ url: URL) {
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("ActivityTracker-archive-\(UUID().uuidString)", isDirectory: true)
-        do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            let copy = folder.appendingPathComponent("archive.sqlite")
-            try FileManager.default.copyItem(at: url, to: copy)
-            for suffix in ["-wal", "-shm"] {
-                let side = URL(fileURLWithPath: url.path + suffix)
-                if FileManager.default.fileExists(atPath: side.path) {
-                    try? FileManager.default.copyItem(at: side, to: URL(fileURLWithPath: copy.path + suffix))
+        let days = AppServices.shared.days
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                // A file from elsewhere: refuse anything that isn't a plain, sane database before touching it.
+                if let problem = ActivityStore.archiveProblem(at: url.path) {
+                    throw DatabaseError(message: problem)
+                }
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true,
+                                                        attributes: [.posixPermissions: 0o700])
+                let copy = folder.appendingPathComponent("archive.sqlite")
+                try FileManager.default.copyItem(at: url, to: copy)
+                for suffix in ["-wal", "-shm"] {
+                    let side = URL(fileURLWithPath: url.path + suffix)
+                    if FileManager.default.fileExists(atPath: side.path) {
+                        try? FileManager.default.copyItem(at: side, to: URL(fileURLWithPath: copy.path + suffix))
+                    }
+                }
+                let store = try ActivityStore(path: copy.path, days: days)
+                let system = try SystemStore(path: copy.path, days: days)
+                let network = try NetworkStore(path: copy.path, days: days)
+                let machine = try MachineStore(path: copy.path, days: days)
+                try store.rekeyDays()
+                try system.rekeyDays()
+                try network.rekeyDays()
+                try machine.rekeyDays()
+                let summary = try store.historySummary()
+                let last = summary.last ?? days.startOfDay(Date())
+                DispatchQueue.main.async {
+                    let stats = StatsModel(store: store, systemStore: system, networkStore: network, machineStore: machine,
+                                           anchor: last)
+                    let insights = InsightsModel(store: store, now: { last })
+                    let stability = StabilityMonitor(path: copy.path, days: days)
+                    stability.openReadOnly()
+                    let session = ArchiveSession(folder: folder, stats: stats, insights: insights, stability: stability)
+                    sessions.append(session)
+                    session.show(name: url.lastPathComponent, summary: summary)
+                }
+            } catch {
+                try? FileManager.default.removeItem(at: folder)
+                DispatchQueue.main.async {
+                    let alert = NSAlert()
+                    alert.alertStyle = .warning
+                    alert.messageText = L.tr("Не удалось открыть базу", "Could not open the database")
+                    alert.informativeText = "\(url.lastPathComponent): \(error)"
+                    NSApp.activate(ignoringOtherApps: true)
+                    alert.runModal()
                 }
             }
-            let days = AppServices.shared.days
-            let store = try ActivityStore(path: copy.path, days: days)
-            let system = try SystemStore(path: copy.path, days: days)
-            let network = try NetworkStore(path: copy.path, days: days)
-            let machine = try MachineStore(path: copy.path, days: days)
-            try store.rekeyDays()
-            try system.rekeyDays()
-            try network.rekeyDays()
-            try machine.rekeyDays()
-            let summary = try store.historySummary()
-            let last = summary.last ?? days.startOfDay(Date())
-            let stats = StatsModel(store: store, systemStore: system, networkStore: network, machineStore: machine, anchor: last)
-            let insights = InsightsModel(store: store, now: { last })
-            let stability = StabilityMonitor(path: copy.path, days: days)
-            stability.openReadOnly()
+        }
+    }
 
-            let session = ArchiveSession(folder: folder, stats: stats, insights: insights, stability: stability)
-            sessions.append(session)
-            session.show(name: url.lastPathComponent, summary: summary)
-        } catch {
-            try? FileManager.default.removeItem(at: folder)
-            let alert = NSAlert()
-            alert.alertStyle = .warning
-            alert.messageText = L.tr("Не удалось открыть базу", "Could not open the database")
-            alert.informativeText = "\(url.lastPathComponent): \(error)"
-            NSApp.activate(ignoringOtherApps: true)
-            alert.runModal()
+    /// Whether a saved copy is open (the Dock icon stays while it is).
+    static var hasOpenWindows: Bool { !sessions.isEmpty }
+
+    /// Temporary copies left behind by a crash or a forced quit are removed at launch.
+    static func removeLeftovers() {
+        DispatchQueue.global(qos: .background).async {
+            let temp = FileManager.default.temporaryDirectory
+            guard let names = try? FileManager.default.contentsOfDirectory(atPath: temp.path) else { return }
+            for name in names where name.hasPrefix("ActivityTracker-archive-") {
+                try? FileManager.default.removeItem(at: temp.appendingPathComponent(name))
+            }
         }
     }
 
@@ -324,7 +352,7 @@ struct ArchiveView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     StatsControls()
                     if let report = stats.report {
-                        DaySummaryCard(lines: stats.daySummary)
+                        DaySummaryCard(lines: stats.daySummary).id(stats.periodTitle)
                         ReportOverview(report: report, style: .wide)
                         if let switches = stats.switches {
                             SwitchesCard(stats: switches, usualPerHour: nil)

@@ -82,11 +82,13 @@ final class Updater: ObservableObject {
     static func fetch(_ url: URL, to file: URL? = nil, timeout: TimeInterval) throws -> Data {
         var lastError: Error = UpdateError.http(-1)
         for ipVersion in ["-4", ""] {
-            var arguments = ["-fsSL", "--max-time", String(Int(timeout)), "--connect-timeout", "15",
+            // https only, also after redirects (GitHub sends downloads to its CDN); never more than 200 MB.
+            var arguments = ["-fsSL", "--proto", "=https", "--proto-redir", "=https", "--max-filesize", "200000000",
+                             "--max-time", String(Int(timeout)), "--connect-timeout", "15",
                              "-H", "Accept: application/vnd.github+json", "-A", "ActivityTracker"]
             if !ipVersion.isEmpty { arguments.append(ipVersion) }
             if let file { arguments += ["-o", file.path] }
-            arguments.append(url.absoluteString)
+            arguments += ["--", url.absoluteString]
             do {
                 let output = try Installer.run("/usr/bin/curl", arguments)
                 return Data(output.utf8)
@@ -225,7 +227,13 @@ enum Installer {
     static func stage(zip: URL, expectedBuild: Int?) throws -> URL {
         let folder = try updatesDirectory().appendingPathComponent("staged", isDirectory: true)
         try? FileManager.default.removeItem(at: folder)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
+        // Look inside before unpacking: one ActivityTracker.app, nothing outside it.
+        let listing = try run("/usr/bin/zipinfo", ["-1", zip.path]).split(separator: "\n").map(String.init)
+        guard UpdateFeed.isSafeArchiveListing(listing) else {
+            throw UpdateError.badBundle(L.tr("в архиве лишние или опасные файлы", "unexpected or unsafe files in the archive"))
+        }
         try run("/usr/bin/ditto", ["-x", "-k", zip.path, folder.path])
         // Our own downloads are not needed any more; a zip handed in from elsewhere (--update-from-zip) is left alone.
         if zip.deletingLastPathComponent().standardizedFileURL == (try? updatesDirectory())?.standardizedFileURL {
@@ -243,8 +251,26 @@ enum Installer {
         if let expectedBuild, Int(info["CFBundleVersion"] as? String ?? "") != expectedBuild {
             throw UpdateError.badBundle(L.tr("ожидалась сборка \(expectedBuild)", "expected build \(expectedBuild)"))
         }
+        // No link may lead outside the bundle, and the files must match the signature they were built with
+        // (catches a damaged or altered download before it gets this Mac's signature).
+        try checkLinks(inside: app)
+        try run("/usr/bin/codesign", ["--verify", "--deep", "--strict", app.path], timeout: 120)
         try sign(app)
         return app
+    }
+
+    /// Every symbolic link in the bundle must resolve to a place inside it.
+    static func checkLinks(inside app: URL) throws {
+        let root = app.resolvingSymlinksInPath().path + "/"
+        guard let enumerator = FileManager.default.enumerator(at: app, includingPropertiesForKeys: [.isSymbolicLinkKey]) else { return }
+        for case let file as URL in enumerator {
+            guard (try? file.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == true else { continue }
+            let target = file.resolvingSymlinksInPath().path
+            guard target.hasPrefix(root) else {
+                throw UpdateError.badBundle(L.tr("ссылка за пределы приложения: \(file.lastPathComponent)",
+                                                 "a link outside the app: \(file.lastPathComponent)"))
+            }
+        }
     }
 
     static func sign(_ app: URL) throws {
@@ -319,6 +345,11 @@ enum Installer {
         let newBuild = Int(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "") ?? 0
         log("installer: \(source.path) → \(target.path) (build \(newBuild))")
         guard let bundleID = Bundle.main.bundleIdentifier else { return 1 }
+        // Only ever replace an ActivityTracker.app, never some other folder passed on the command line.
+        guard target.lastPathComponent == "ActivityTracker.app", canReplace(target) else {
+            log("installer: refusing target \(target.path)")
+            return 1
+        }
 
         // One installer at a time: an update and an adoption must never swap bundles concurrently.
         guard let lock = acquireInstallLock() else {
@@ -451,8 +482,10 @@ enum Installer {
         return condition()
     }
 
+    /// Runs a tool and returns its output. A tool still running after `timeout` seconds is terminated (a hung helper
+    /// must not stop the caller's queue for good).
     @discardableResult
-    static func run(_ tool: String, _ arguments: [String]) throws -> String {
+    static func run(_ tool: String, _ arguments: [String], timeout: TimeInterval = 300) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: tool)
         process.arguments = arguments
@@ -460,8 +493,13 @@ enum Installer {
         process.standardOutput = pipe
         process.standardError = pipe
         try process.run()
+        let watchdog = DispatchWorkItem { [weak process] in
+            if process?.isRunning == true { process?.terminate() }
+        }
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout, execute: watchdog)
         let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         process.waitUntilExit()
+        watchdog.cancel()
         guard process.terminationStatus == 0 else {
             throw UpdateError.command((tool as NSString).lastPathComponent, process.terminationStatus,
                                       String(output.suffix(500)))

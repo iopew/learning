@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # publishing releases (the app updates itself from them)
+  contents: read   # building and testing only read; publishing has its own job with write access
 
 concurrency:
   group: activity-tracker-${{ github.ref }}
@@ -29,7 +29,7 @@ jobs:
       run:
         working-directory: ActivityTracker
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Toolchain
         run: swift --version
@@ -134,13 +134,28 @@ jobs:
         if: always()
         run: pkill -x ActivityTracker || true
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ActivityTracker
           path: ActivityTracker/.build/ActivityTracker.zip
 
+  # Publishing gets write access only here, after the build and every check passed. It runs no code from the
+  # repository except the git log for the notes.
+  publish:
+    needs: build
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/claude/'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # the release (the app updates itself from these)
+    env:
+      BUILD_NUMBER: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: ActivityTracker
+          path: dist
       - name: Publish release (the app updates itself from these)
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/claude/'))
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -150,9 +165,9 @@ jobs:
           Ветка ${GITHUB_REF_NAME}, коммит ${GITHUB_SHA::7}."
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             # A re-run of the same workflow run: refresh the asset instead of failing.
-            gh release upload "$tag" .build/ActivityTracker.zip --repo "$GITHUB_REPOSITORY" --clobber
+            gh release upload "$tag" dist/ActivityTracker.zip --repo "$GITHUB_REPOSITORY" --clobber
           else
-            gh release create "$tag" .build/ActivityTracker.zip --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            gh release create "$tag" dist/ActivityTracker.zip --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
               --title "ActivityTracker — сборка $BUILD_NUMBER" --notes "$notes"
           fi
           # Keep the five newest builds.

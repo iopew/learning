@@ -73,7 +73,7 @@ final class SystemSampler {
 
     /// `pmset -g stats`: the number of dark wakes since boot.
     private static func darkWakeCount() -> Int? {
-        guard let output = try? Installer.run("/usr/bin/pmset", ["-g", "stats"]) else { return nil }
+        guard let output = try? Installer.run("/usr/bin/pmset", ["-g", "stats"], timeout: 5) else { return nil }
         return SleepNights.darkWakeCount(inStats: output)
     }
 
@@ -97,6 +97,8 @@ final class SystemSampler {
     private func sample() {
         queue.async { [self] in
             let now = Date()
+            // Samples queued up while the queue was busy would each claim a second: skip them.
+            if let last = lastSampleAt, now.timeIntervalSince(last) < 30 { return }
             // Time this sample stands for: normally a minute; never more (after sleep the gap was not "on battery").
             let elapsed = lastSampleAt.map { min(max(now.timeIntervalSince($0), 1), Self.interval) } ?? Self.interval
             lastSampleAt = now

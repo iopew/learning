@@ -20,8 +20,8 @@ struct DaySummaryCard: View {
                     Label(L.tr("пересказ нейросетью Apple на этом Mac", "retold by Apple's on-device model"), systemImage: "sparkles")
                         .font(.caption2).foregroundStyle(.secondary)
                 } else {
-                    ForEach(lines, id: \.self) { line in
-                        Text(line).font(.callout).fixedSize(horizontal: false, vertical: true)
+                    ForEach(Array(lines.enumerated()), id: \.offset) { item in
+                        Text(item.element).font(.callout).fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 HStack(spacing: 10) {
@@ -151,8 +151,8 @@ struct CommandLineSection: View {
                     .font(.caption.monospaced())
                     .textSelection(.enabled)
             }
-            Text(L.tr("Примеры: activitytracker today · activitytracker report 7d · activitytracker pause 30m · activitytracker export 30d --out ~/Desktop/a.csv · activitytracker sql \"SELECT * FROM daily_apps LIMIT 10\". Ссылки activitytracker://pause?minutes=30 работают из заметок и Быстрых команд.",
-                      "Examples: activitytracker today · activitytracker report 7d · activitytracker pause 30m · activitytracker export 30d --out ~/Desktop/a.csv · activitytracker sql \"SELECT * FROM daily_apps LIMIT 10\". Links like activitytracker://pause?minutes=30 work from notes and Shortcuts."))
+            Text(L.tr("Примеры: activitytracker today · activitytracker report 7d · activitytracker pause 30m · activitytracker export 30d --out ~/Desktop/a.csv · activitytracker sql \"SELECT * FROM daily_apps LIMIT 10\". Ссылка activitytracker://open открывает окно.",
+                      "Examples: activitytracker today · activitytracker report 7d · activitytracker pause 30m · activitytracker export 30d --out ~/Desktop/a.csv · activitytracker sql \"SELECT * FROM daily_apps LIMIT 10\". The link activitytracker://open opens the window."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

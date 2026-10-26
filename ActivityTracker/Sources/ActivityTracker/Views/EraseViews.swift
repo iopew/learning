@@ -5,8 +5,9 @@ import ActivityCore
 /// Asks for confirmation and deletes recorded data.
 enum DataEraser {
     /// Returns whether the data was deleted.
+    /// `completion` runs on the main thread once everything is deleted.
     @discardableResult
-    static func confirmAndErase(_ what: ActivityStore.Erase) -> Bool {
+    static func confirmAndErase(_ what: ActivityStore.Erase, completion: (() -> Void)? = nil) -> Bool {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = question(for: what)
@@ -17,15 +18,16 @@ enum DataEraser {
         NSApp.activate(ignoringOtherApps: true)
         guard alert.runModal() == .alertFirstButtonReturn else { return false }
         let services = AppServices.shared
-        services.tracker.erase(what)
         services.sampler.erase(what)
-        do {
-            try services.networkStore.erase(what)
-            try services.machineStore.erase(what)
-        } catch {
-            NSLog("ActivityTracker: erase network data: \(error)")
-        }
-        if case .before(let moment) = what { services.stability.erase(before: moment) }
+        services.stability.erase(what)
+        services.tracker.erase(what, alsoErase: {
+            do {
+                try services.networkStore.erase(what)
+                try services.machineStore.erase(what)
+            } catch {
+                NSLog("ActivityTracker: erase network/machine data: \(error)")
+            }
+        }, completion: completion)
         return true
     }
 

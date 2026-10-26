@@ -54,7 +54,7 @@ final class NetworkMonitor: NSObject, CLLocationManagerDelegate {
         let manager = CLLocationManager()
         manager.delegate = self
         location = manager
-        if manager.authorizationStatus == .notDetermined { manager.requestWhenInUseAuthorization() }
+        // macOS asks for Location only when the user chooses to see network names (button in the Network pane).
 
         path.pathUpdateHandler = { [weak self] path in self?.expensive = path.isExpensive }
         path.start(queue: queue)
@@ -67,6 +67,21 @@ final class NetworkMonitor: NSObject, CLLocationManagerDelegate {
     }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {}
+
+    /// "Показывать названия сетей": asks macOS for Location (used only to read Wi-Fi names).
+    func requestNames() {
+        if location?.authorizationStatus == .notDetermined {
+            location?.requestWhenInUseAuthorization()
+        } else if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    /// A router address from the network (DHCP) is used as a ping argument only if it is a plain IPv4 address.
+    static func isIPv4(_ text: String) -> Bool {
+        var address = in_addr()
+        return text.count <= 15 && inet_pton(AF_INET, text, &address) == 1
+    }
 
     /// Whether Wi-Fi names can be read (Location Services allowed).
     var namesAllowed: Bool {
@@ -170,7 +185,7 @@ final class NetworkMonitor: NSObject, CLLocationManagerDelegate {
         }
         pingRunning = true
         pingQueue.async { [self] in
-            if let router, router.contains(".") {
+            if let router, Self.isIPv4(router) {
                 sample.pingRouter = Self.ping(router).average
             }
             let internet = Self.ping(Self.internetHost)

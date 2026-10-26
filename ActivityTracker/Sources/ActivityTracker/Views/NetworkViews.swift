@@ -31,11 +31,15 @@ struct NetworkPane: View {
                     ProgressView().frame(maxWidth: .infinity)
                 }
                 if !isArchive, !AppServices.shared.network.namesAllowed {
-                    Text(L.tr("Чтобы видеть названия Wi-Fi сетей, разреши ActivityTracker геолокацию: Системные настройки → Конфиденциальность и безопасность → Службы геолокации. Координаты не читаются.",
-                              "To see Wi-Fi network names, allow Location Services for ActivityTracker: System Settings → Privacy & Security → Location Services. No coordinates are read."))
-                        .font(.caption)
-                        .padding(8)
-                        .background(Color.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 6))
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(L.tr("Чтобы видеть названия Wi-Fi сетей, macOS требует доступ к геолокации. Он нужен только для имени сети: координаты не читаются и не сохраняются.",
+                                  "To show Wi-Fi network names, macOS requires Location access. It is used only for the network name: no coordinates are read or stored."))
+                            .font(.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button(L.tr("Показывать названия сетей", "Show network names")) { AppServices.shared.network.requestNames() }
+                    }
+                    .padding(8)
+                    .background(Color.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 6))
                 }
                 Text(L.tr("Трафик — всё, что прошло через Wi-Fi, кабель и модем (VPN не считается дважды). Средняя скорость — пока что-то реально скачивалось, а не в среднем за всё время. Скорость Wi-Fi — связь Mac с роутером. Пинг — раз в минуту до роутера и до 1.1.1.1. Обрыв — минута, когда интернет не ответил.",
                           "Traffic is everything over Wi-Fi, cable and tethering (VPN isn't counted twice). Average speed is while something was actually transferring, not over the whole time. Wi-Fi speed is the link between the Mac and the router. Ping: once a minute to the router and to 1.1.1.1. An outage is a minute when the internet didn't answer."))

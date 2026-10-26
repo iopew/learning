@@ -54,7 +54,9 @@ public enum StabilityParser {
         let bugType = (header["bug_type"] as? String) ?? (header["bug_type"] as? Int).map(String.init) ?? ""
 
         let kind: StabilityEvent.Kind
-        if lower.hasSuffix(".panic") || bugType == "210" || lower.hasPrefix("kernel") || lower.contains("panic") {
+        let isDiag = lower.hasSuffix(".diag") || lower.contains("_resource")
+        // kernel_task's CPU / disk-write complaints are .diag files too: they are not panics.
+        if lower.hasSuffix(".panic") || bugType == "210" || (!isDiag && lower.hasPrefix("panic-")) {
             kind = .panic
         } else if lower.hasPrefix("jetsamevent") || bugType == "298" {
             kind = .memory
@@ -175,6 +177,7 @@ public final class StabilityStore {
         try db.execute("""
             PRAGMA journal_mode=WAL;
             PRAGMA synchronous=NORMAL;
+            PRAGMA secure_delete=ON;
             CREATE TABLE IF NOT EXISTS stability_events(
                 source TEXT PRIMARY KEY,
                 at REAL NOT NULL,
@@ -218,7 +221,7 @@ public final class StabilityStore {
     }
 
     /// Events since `since`, newest first.
-    public func events(since: Date, limit: Int = 2000) throws -> [StabilityEvent] {
+    public func events(since: Date, limit: Int = 20_000) throws -> [StabilityEvent] {
         lock.lock()
         defer { lock.unlock() }
 
@@ -232,12 +235,23 @@ public final class StabilityStore {
         }
     }
 
-    /// Events before `moment` (clean-up of old history).
-    public func erase(before moment: Date) throws {
+    /// Mirrors ActivityStore.erase: a period, everything before a moment, or everything. (Crash reports name apps,
+    /// not bundle IDs or sites, so per-app / per-site deletion doesn't apply.)
+    public func erase(_ what: ActivityStore.Erase) throws {
         lock.lock()
         defer { lock.unlock() }
 
-        try db.run("DELETE FROM stability_events WHERE at < ?", [.double(moment.timeIntervalSince1970)])
+        switch what {
+        case .domain, .app:
+            return
+        case .since(let moment):
+            try db.run("DELETE FROM stability_events WHERE at >= ?", [.double(moment.timeIntervalSince1970)])
+        case .before(let moment):
+            try db.run("DELETE FROM stability_events WHERE at < ?", [.double(moment.timeIntervalSince1970)])
+        case .all:
+            try db.run("DELETE FROM stability_events")
+        }
+        try db.execute("PRAGMA wal_checkpoint(TRUNCATE);")
     }
 }
 
@@ -423,7 +437,9 @@ public enum StabilityNames {
     public static func isSystem(_ name: String) -> Bool {
         if known[name] != nil || name.hasPrefix("com.apple.") || name == "macOS" { return true }
         guard name == name.lowercased(), !name.contains(" ") else { return false }
-        return name.hasSuffix("d") || name.hasSuffix("agent") || name.hasSuffix("service") || name.contains("helper")
+        // Short names like "zed" are programs; daemons are longer ("bluetoothd", "photoanalysisd").
+        return (name.hasSuffix("d") && name.count >= 6) || name.hasSuffix("agent") || name.hasSuffix("service")
+            || name.contains("helper")
     }
 
     /// "анализ текста (подсказки, Apple Intelligence)" — or nil for an unknown name.

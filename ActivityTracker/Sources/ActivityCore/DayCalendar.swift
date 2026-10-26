@@ -15,18 +15,23 @@ public struct DayCalendar {
         self.startHour = min(max(startHour, 0), 5)
     }
 
-    /// The moment moved so that the day boundary falls on midnight.
-    private func shifted(_ date: Date) -> Date {
-        startHour == 0 ? date : calendar.date(byAdding: .hour, value: -startHour, to: date) ?? date
+    /// The calendar date (midnight) a moment belongs to: before `startHour` by the wall clock it is still the
+    /// previous date. Works in wall-clock terms, so DST days keep the boundary at 04:00 too.
+    private func dayMidnight(_ date: Date) -> Date {
+        let midnight = calendar.startOfDay(for: date)
+        guard startHour > 0, calendar.component(.hour, from: date) < startHour else { return midnight }
+        return calendar.startOfDay(for: calendar.date(byAdding: .day, value: -1, to: midnight) ?? midnight)
     }
 
-    /// A midnight of the shifted scale back to the real day start.
-    private func unshifted(_ date: Date) -> Date {
-        startHour == 0 ? date : calendar.date(byAdding: .hour, value: startHour, to: date) ?? date
+    /// `startHour`:00 by the wall clock on the date of `midnight`.
+    private func dayStart(_ midnight: Date) -> Date {
+        guard startHour > 0 else { return midnight }
+        return calendar.date(bySettingHour: startHour, minute: 0, second: 0, of: midnight)
+            ?? midnight.addingTimeInterval(TimeInterval(startHour) * 3600)
     }
 
     public func key(_ date: Date) -> String {
-        let parts = calendar.dateComponents([.year, .month, .day], from: shifted(date))
+        let parts = calendar.dateComponents([.year, .month, .day], from: dayMidnight(date))
         return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
     }
 
@@ -35,16 +40,16 @@ public struct DayCalendar {
         guard parts.count == 3,
               let midnight = calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
         else { return nil }
-        return unshifted(midnight)
+        return dayStart(midnight)
     }
 
     public func startOfDay(_ date: Date) -> Date {
-        unshifted(calendar.startOfDay(for: shifted(date)))
+        dayStart(dayMidnight(date))
     }
 
     /// Calendar midnight of the date a day is named after (the "00:00" its clock times are measured from).
     public func midnight(of day: Date) -> Date {
-        calendar.startOfDay(for: shifted(day))
+        dayMidnight(day)
     }
 
     public func addingDays(_ days: Int, to date: Date) -> Date {
@@ -52,8 +57,8 @@ public struct DayCalendar {
     }
 
     public func startOfWeek(_ date: Date) -> Date {
-        let moved = shifted(date)
-        return unshifted(calendar.dateInterval(of: .weekOfYear, for: moved)?.start ?? calendar.startOfDay(for: moved))
+        let midnight = dayMidnight(date)
+        return dayStart(calendar.dateInterval(of: .weekOfYear, for: midnight)?.start ?? midnight)
     }
 
     /// Number of calendar days from `from` to `to`, inclusive.
@@ -64,7 +69,7 @@ public struct DayCalendar {
 
     /// Saturday or Sunday (by the calendar), for the day `date` belongs to.
     public func isWeekend(_ date: Date) -> Bool {
-        calendar.isDateInWeekend(shifted(date))
+        calendar.isDateInWeekend(dayMidnight(date))
     }
 }
 

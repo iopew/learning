@@ -48,6 +48,9 @@ final class MachineMonitor {
         queue.async { [self] in
             scanStartup()
             let last = (try? store.lastFolderScan()) ?? nil
+            // Walking big folders costs energy: only on power, not in Low Power Mode.
+            let onBattery = BatteryReader.read().map { !$0.onAC } ?? false
+            guard !onBattery, !ProcessInfo.processInfo.isLowPowerModeEnabled else { return }
             if last.map({ Date().timeIntervalSince($0) >= 20 * 3600 }) ?? true { scanFolders() }
         }
     }
@@ -97,14 +100,19 @@ final class MachineMonitor {
             at: url, includingPropertiesForKeys: keys, options: [], errorHandler: { _, _ in true })
         else { return 0 }
         var total: Double = 0
-        for case let file as URL in enumerator {
-            if skipAppleCaches, enumerator.level == 1, file.lastPathComponent.hasPrefix("com.apple.") {
-                enumerator.skipDescendants()
-                continue
+        let deadline = Date().addingTimeInterval(120)   // a huge folder gets a partial size rather than minutes of work
+        while let next = enumerator.nextObject() {
+            autoreleasepool {
+                guard let file = next as? URL else { return }
+                if skipAppleCaches, enumerator.level == 1, file.lastPathComponent.hasPrefix("com.apple.") {
+                    enumerator.skipDescendants()
+                    return
+                }
+                if let size = (try? file.resourceValues(forKeys: [.totalFileAllocatedSizeKey]))?.totalFileAllocatedSize {
+                    total += Double(size)
+                }
             }
-            if let size = (try? file.resourceValues(forKeys: [.totalFileAllocatedSizeKey]))?.totalFileAllocatedSize {
-                total += Double(size)
-            }
+            if Date() > deadline { break }
         }
         return total
     }

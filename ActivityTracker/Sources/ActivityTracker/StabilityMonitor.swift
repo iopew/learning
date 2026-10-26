@@ -46,7 +46,8 @@ final class StabilityMonitor: ObservableObject {
             scan()
             DispatchQueue.main.async { self.watch() }
             // The boot log is read a few minutes after start, once per boot, at low priority.
-            queue.asyncAfter(deadline: .now() + 300) { [self] in checkShutdownCause(boot: boot) }
+            // `log show` can take a while: on its own queue, so the Stability pane never waits for it.
+            DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 300) { [self] in checkShutdownCause(boot: boot) }
         }
     }
 
@@ -76,9 +77,9 @@ final class StabilityMonitor: ObservableObject {
     }
 
     /// Clean-up of old history.
-    func erase(before moment: Date) {
+    func erase(_ what: ActivityStore.Erase) {
         queue.async { [self] in
-            try? store?.erase(before: moment)
+            try? store?.erase(what)
             reload()
         }
     }
@@ -129,6 +130,9 @@ final class StabilityMonitor: ObservableObject {
     }
 
     private static func read(_ file: URL) -> StabilityEvent? {
+        // Only regular files: a FIFO or a link planted in the folder must not block the queue.
+        var info = stat()
+        guard lstat(file.path, &info) == 0, (info.st_mode & mode_t(S_IFMT)) == mode_t(S_IFREG) else { return nil }
         guard let handle = try? FileHandle(forReadingFrom: file) else { return nil }
         defer { try? handle.close() }
         let data = (try? handle.read(upToCount: 8192)) ?? Data()
@@ -242,18 +246,21 @@ final class StabilityMonitor: ObservableObject {
             return
         }
         // Read while it runs (a full pipe would block it); give up after 60 s.
-        var output = Data()
+        final class Box { var data = Data() }
+        let box = Box()
         let reader = DispatchQueue(label: "ActivityTracker.stability.log")
         let done = DispatchSemaphore(value: 0)
         reader.async {
-            output = pipe.fileHandleForReading.readDataToEndOfFile()
+            box.data = pipe.fileHandleForReading.readDataToEndOfFile()
             done.signal()
         }
         if done.wait(timeout: .now() + 60) == .timedOut {
             process.terminate()
-            _ = done.wait(timeout: .now() + 5)
+            // Reading ends once the process is gone; without that, give up on the output.
+            guard done.wait(timeout: .now() + 5) == .success else { return }
         }
         process.waitUntilExit()
+        let output = box.data
         guard let code = StabilityParser.shutdownCause(inLog: String(decoding: output, as: UTF8.self)) else { return }
         let event = StabilityEvent(source: "shutdown-\(bootKey)", at: boot, kind: .shutdown,
                                    name: StabilityParser.describeShutdown(code),

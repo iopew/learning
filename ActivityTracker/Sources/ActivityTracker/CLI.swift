@@ -53,11 +53,11 @@ enum CLI {
                 var seconds: TimeInterval = 0
                 if let length = args.first {
                     guard let until = PauseLength.until(length, now: Date(), days: days) else {
-                        return fail("pause: 30m, 2h, 90 (минут) или tomorrow")
+                        return fail("pause: 30m, 2h, 90 (минут, до суток) или tomorrow")
                     }
                     seconds = until.timeIntervalSinceNow
                 }
-                control("pause:\(Int(seconds))")
+                control(seconds > 0 ? "pause:\(Int(seconds.rounded()))" : "pause")
                 print(seconds > 0 ? L.tr("Пауза на \(Format.duration(seconds)).", "Paused for \(Format.duration(seconds)).")
                                   : L.tr("Пауза.", "Paused."))
             case "resume":
@@ -142,28 +142,24 @@ enum CLI {
         }
     }
 
+    /// From the `activitytracker` command (same user, same Mac). Anything malformed is ignored; a timed pause is at
+    /// most a day.
     static func handle(_ command: String) {
         let tracker = AppServices.shared.tracker
         if command == "resume" {
             tracker.setPaused(false)
-        } else if command.hasPrefix("pause") {
-            let seconds = Double(command.split(separator: ":").last ?? "") ?? 0
-            tracker.setPaused(true, until: seconds > 0 ? Date().addingTimeInterval(seconds) : nil)
+        } else if command == "pause" || command == "pause:0" {
+            tracker.setPaused(true)
+        } else if command.hasPrefix("pause:"),
+                  let minutes = PauseLength.valid(Double(command.dropFirst("pause:".count)).map { $0 / 60 }) {
+            tracker.setPaused(true, until: Date().addingTimeInterval(minutes * 60))
         }
     }
 
-    /// activitytracker://pause?minutes=30, activitytracker://resume, activitytracker://open
+    /// activitytracker://open (any other link too) only opens the window. Pausing and resuming are left to the
+    /// command line: a web page must not be able to switch recording on or off.
     static func handle(url: URL) {
-        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-        switch url.host ?? "" {
-        case "pause":
-            let minutes = components?.queryItems?.first { $0.name == "minutes" }?.value.flatMap(Double.init) ?? 0
-            handle("pause:\(Int(minutes * 60))")
-        case "resume":
-            handle("resume")
-        default:
-            MainWindowController.shared.show()
-        }
+        MainWindowController.shared.show()
     }
 
     // MARK: - Installing the command

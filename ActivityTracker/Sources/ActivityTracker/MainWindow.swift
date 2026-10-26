@@ -33,13 +33,17 @@ final class MainWindowController: NSObject, NSWindowDelegate {
 
     /// Dock icon only while the window is open, unless the user wants it always.
     func applyDockPolicy() {
-        let inDock = AppServices.shared.settings.alwaysShowInDock || isVisible
+        let inDock = AppServices.shared.settings.alwaysShowInDock || isVisible || ArchiveSession.hasOpenWindows
         NSApp.setActivationPolicy(inDock ? .regular : .accessory)
     }
 
     func windowWillClose(_ notification: Notification) {
-        // The window is still visible during this callback.
-        DispatchQueue.main.async { self.applyDockPolicy() }
+        // The window is still visible during this callback. Its views are released, so nothing keeps redrawing
+        // charts in the background; show() builds a fresh window (position and size are remembered).
+        DispatchQueue.main.async {
+            self.window = nil
+            self.applyDockPolicy()
+        }
     }
 
     private func makeWindow() -> NSWindow {
@@ -293,7 +297,7 @@ struct MainWindowView: View {
                         ExportMenu()
                     }
                     if let report = stats.report {
-                        DaySummaryCard(lines: stats.daySummary)
+                        DaySummaryCard(lines: stats.daySummary).id(stats.periodTitle)
                         ReportOverview(report: report, style: .wide)
                         if let switches = stats.switches {
                             SwitchesCard(stats: switches, lastHour: stats.lastHourSwitches,

@@ -124,7 +124,11 @@ public struct BatteryForecast: Equatable {
         let span = last.timeIntervalSince(first) / 86400
         forecast.historyDays = Int(span.rounded()) + 1
 
-        let withCycles = daily.filter { $0.cycles != nil }
+        // A replaced battery starts counting cycles again: only the stretch after the last drop counts.
+        var withCycles = daily.filter { $0.cycles != nil }
+        if let reset = withCycles.indices.dropFirst().last(where: { (withCycles[$0].cycles ?? 0) < (withCycles[$0 - 1].cycles ?? 0) }) {
+            withCycles = Array(withCycles[reset...])
+        }
         if span >= 14, let a = withCycles.first, let b = withCycles.last, let c0 = a.cycles, let c1 = b.cycles {
             let days = b.day.timeIntervalSince(a.day) / 86400
             if days >= 14 {
@@ -347,6 +351,7 @@ public final class MachineStore {
         try db.execute("""
             PRAGMA journal_mode=WAL;
             PRAGMA synchronous=NORMAL;
+            PRAGMA secure_delete=ON;
             CREATE TABLE IF NOT EXISTS power_events(
                 at REAL PRIMARY KEY, day TEXT NOT NULL, kind TEXT NOT NULL, percent REAL, dark_wakes INTEGER);
             CREATE INDEX IF NOT EXISTS power_events_day ON power_events(day);
@@ -456,7 +461,8 @@ public final class MachineStore {
         case .since(let moment):
             let time = SQLValue.double(moment.timeIntervalSince1970)
             try db.run("DELETE FROM power_events WHERE at >= ?", [time])
-            try db.run("DELETE FROM sleep_blockers_hourly WHERE hour >= ?", [time])
+            try db.run("DELETE FROM sleep_blockers_hourly WHERE hour >= ?", [.double((moment.timeIntervalSince1970 / 3600).rounded(.down) * 3600)])
+            try db.run("DELETE FROM folder_sizes WHERE at >= ?", [time])
         case .before(let moment):
             let time = SQLValue.double(moment.timeIntervalSince1970)
             try db.run("DELETE FROM power_events WHERE at < ?", [time])
@@ -466,9 +472,10 @@ public final class MachineStore {
         case .all:
             try db.execute("""
                 DELETE FROM power_events; DELETE FROM sleep_blockers_hourly; DELETE FROM folder_sizes;
-                DELETE FROM disk_writes_daily;
+                DELETE FROM disk_writes_daily; DELETE FROM startup_items;
                 """)
         }
+        try db.execute("PRAGMA wal_checkpoint(TRUNCATE);")
     }
 
     @discardableResult

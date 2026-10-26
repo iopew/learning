@@ -128,6 +128,10 @@ struct MinuteGrid: View {
                 .onContinuousHover { phase in
                     switch phase {
                     case .active(let point):
+                        guard cellWidth > 0, rowHeight > 0, point.x >= labelWidth else {
+                            hovered = nil
+                            return
+                        }
                         let hour = Int(point.y / rowHeight)
                         let minute = Int((point.x - labelWidth) / cellWidth)
                         hovered = (0..<24).contains(hour) && (0..<60).contains(minute) ? hour * 60 + minute : nil

@@ -13,6 +13,8 @@ struct PopoverView: View {
 
     @EnvironmentObject private var ui: UIState
     @State private var isOpen = false
+    /// The menu bar panel itself: whether it is really on screen (onDisappear doesn't always fire for it).
+    @State private var panel = WindowBox()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -38,7 +40,7 @@ struct PopoverView: View {
                         }
                         StatsControls()
                         if let report = stats.report {
-                            DaySummaryCard(lines: stats.daySummary)
+                            DaySummaryCard(lines: stats.daySummary).id(stats.periodTitle)
                             ReportOverview(report: report, style: .compact)
                             if let switches = stats.switches {
                                 SwitchesCard(stats: switches, lastHour: stats.lastHourSwitches,
@@ -66,9 +68,10 @@ struct PopoverView: View {
             stats.reload()
         }
         .onDisappear { isOpen = false }
+        .background(WindowReader(box: panel))
         .onReceive(tracker.$todayTotal) { _ in
             // Keep the numbers in step with the menu bar counter while the window is open.
-            if isOpen && !ui.popoverShowsSettings { stats.refreshIfLive() }
+            if isOpen && panel.window?.isVisible != false && !ui.popoverShowsSettings { stats.refreshIfLive() }
         }
     }
 
@@ -363,5 +366,25 @@ struct AppColors {
 
     func color(_ bundleID: String) -> Color {
         colors[bundleID] ?? Self.other
+    }
+}
+
+/// Holds the window a view lives in (weakly).
+final class WindowBox {
+    weak var window: NSWindow?
+}
+
+/// Finds the hosting window of the view it is placed in.
+struct WindowReader: NSViewRepresentable {
+    let box: WindowBox
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { box.window = view.window }
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        if box.window == nil { DispatchQueue.main.async { box.window = view.window } }
     }
 }

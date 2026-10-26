@@ -40,6 +40,15 @@ final class AppServices {
     let databaseURL: URL
     let startupError: String?
 
+    /// The history (titles, addresses, Wi-Fi names) is readable by this user only: folder 700, files 600.
+    static func restrictPermissions(of database: URL) {
+        let manager = FileManager.default
+        try? manager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: database.deletingLastPathComponent().path)
+        for suffix in ["", "-wal", "-shm"] where manager.fileExists(atPath: database.path + suffix) {
+            try? manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: database.path + suffix)
+        }
+    }
+
     private init() {
         settings = Settings()
         L.current = L.resolve(settings.language)
@@ -62,17 +71,32 @@ final class AppServices {
         var url: URL
         var stores: Stores
         var problem: String?
+        var isFallback = false
         do {
             url = try ActivityStore.defaultURL()
-            stores = try open(url)
+            // Another process may hold the file for a moment (an update finishing): try a few times.
+            var attempt = 0
+            while true {
+                do {
+                    stores = try open(url)
+                    break
+                } catch {
+                    attempt += 1
+                    if attempt >= 3 { throw error }
+                    Thread.sleep(forTimeInterval: 0.5)
+                }
+            }
+            Self.restrictPermissions(of: url)
         } catch {
             url = FileManager.default.temporaryDirectory.appendingPathComponent("ActivityTracker-fallback.sqlite")
             stores = try! open(url)
+            isFallback = true
             problem = L.tr("Основная база недоступна (\(error)). Данные пишутся во временный файл.", "The main database is unavailable (\(error)). Data goes to a temporary file.")
         }
-        // The day boundary changed since the data was written: move every row to its new day once.
+        // The day boundary changed since the data was written: move every row to its new day once (never on the
+        // temporary fallback file: the real database still needs it next time).
         let appliedKey = "dayStartHourApplied"
-        if UserDefaults.standard.integer(forKey: appliedKey) != days.startHour {
+        if !isFallback, UserDefaults.standard.integer(forKey: appliedKey) != days.startHour {
             do {
                 let moved = try stores.recorder.rekeyDays() + stores.systemRecorder.rekeyDays() + stores.network.rekeyDays()
                     + stores.machine.rekeyDays()
@@ -112,6 +136,8 @@ struct ActivityTrackerApp: App {
     @StateObject private var settings = AppServices.shared.settings
 
     init() {
+        // Everything the app creates (database, exports, logs) is private to this user.
+        umask(0o077)
         let arguments = CommandLine.arguments
         func argument(after flag: String) -> String? {
             guard let index = arguments.firstIndex(of: flag), index + 1 < arguments.count else { return nil }
@@ -175,6 +201,7 @@ struct ActivityTrackerApp: App {
         services.stability.start()
         services.network.start()
         services.machine.start()
+        ArchiveSession.removeLeftovers()
         scheduleRollUp()
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main

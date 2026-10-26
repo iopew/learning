@@ -33,6 +33,7 @@ final class StatsModel: ObservableObject {
     private let queue = DispatchQueue(label: "ActivityTracker.stats", qos: .userInitiated)
     private var generation = 0
     private var lastLoad = Date.distantPast
+    private var loading = false
     /// True while the user looks at "today" (not a past period): the anchor then moves on at midnight.
     private var followsToday = true
     /// The usual day changes once a day; only touched on `queue`.
@@ -67,13 +68,15 @@ final class StatsModel: ObservableObject {
     /// Called on every tracker tick while a stats view is visible. Periods that include today change as you work:
     /// the day view refreshes every tick, longer (heavier) periods at most once a minute.
     func refreshIfLive() {
-        guard followsToday else { return }
+        // A slow load (big period, database busy) must not pile up more loads behind it.
+        guard followsToday, !loading else { return }
         if range == .day || Date().timeIntervalSince(lastLoad) >= 60 || !isAtToday { reload() }
     }
 
     func reload() {
         if followsToday { anchor = Date() }   // after midnight "today" is a new day
         lastLoad = Date()
+        loading = true
         generation += 1
         let request = (generation: generation, range: range, anchor: anchor, today: followsToday && isAtToday)
         queue.async { [self] in
@@ -108,6 +111,7 @@ final class StatsModel: ObservableObject {
             }
             DispatchQueue.main.async {
                 guard request.generation == self.generation else { return }   // a newer request is in flight
+                self.loading = false
                 switch result {
                 case .success(let loaded):
                     self.report = loaded.report

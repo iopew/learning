@@ -4,6 +4,10 @@ import SQLite3
 public struct DatabaseError: Error, CustomStringConvertible {
     public let message: String
     public var description: String { message }
+
+    public init(message: String) {
+        self.message = message
+    }
 }
 
 enum SQLValue {
@@ -26,6 +30,8 @@ final class Database {
             throw DatabaseError(message: "open \(path): \(message)")
         }
         sqlite3_busy_timeout(handle, 3000)
+        // A database opened from a file (a saved copy) must not run SQL functions hidden in its views or triggers.
+        sqlite3_exec(handle, "PRAGMA trusted_schema=OFF;", nil, nil, nil)
     }
 
     deinit {

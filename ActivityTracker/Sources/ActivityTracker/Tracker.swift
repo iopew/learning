@@ -27,6 +27,7 @@ final class Tracker: ObservableObject {
     private var activityToken: NSObjectProtocol?
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
     private var screenLocked = false
+    private var lastTick: Date?
     private var asleep = false
 
     init(store: ActivityStore, settings: Settings) {
@@ -59,16 +60,30 @@ final class Tracker: ObservableObject {
         activityToken = nil
     }
 
-    /// Deletes recorded data for good and tells every open statistics view to reload.
-    func erase(_ what: ActivityStore.Erase) {
-        do {
-            try store.erase(what)
-            lastError = nil
-        } catch {
-            lastError = L.tr("Не удалось удалить: \(error)", "Could not delete: \(error)")
+    /// While true, ticks don't write (a deletion or compaction holds the database; the main thread must not wait).
+    var holdWrites = false
+
+    /// Deletes recorded data for good, off the main thread; then refreshes and tells every statistics view to reload.
+    /// `alsoErase` runs on the same background queue (the other stores).
+    func erase(_ what: ActivityStore.Erase, alsoErase: @escaping () -> Void = {}, completion: (() -> Void)? = nil) {
+        holdWrites = true
+        let store = store
+        DispatchQueue.global(qos: .userInitiated).async {
+            var failure: Error?
+            do {
+                try store.erase(what)
+            } catch {
+                failure = error
+            }
+            alsoErase()
+            DispatchQueue.main.async { [self] in
+                holdWrites = false
+                lastError = failure.map { L.tr("Не удалось удалить: \($0)", "Could not delete: \($0)") }
+                refreshToday(Date())
+                NotificationCenter.default.post(name: .activityDataChanged, object: nil)
+                completion?()
+            }
         }
-        refreshToday(Date())
-        NotificationCenter.default.post(name: .activityDataChanged, object: nil)
     }
 
     /// `until`: resume by itself then (pause for 30 minutes, until tomorrow).
@@ -80,6 +95,7 @@ final class Tracker: ObservableObject {
 
     func tick() {
         let now = Date()
+        lastTick = now
         defer {
             refreshToday(now)
             onTick?(state, current?.bundleID, now)
@@ -90,6 +106,7 @@ final class Tracker: ObservableObject {
             settings.isPaused = false
         }
         if settings.isPaused { return pause(.paused, at: now) }
+        if holdWrites { return }
         if screenLocked || asleep { return pause(.away, at: now) }
 
         let idle = Idle.secondsSinceLastInput()
@@ -136,8 +153,8 @@ final class Tracker: ObservableObject {
         } catch {
             lastError = L.tr("Не удалось записать: \(error)", "Could not record: \(error)")
         }
-        current = sample
-        state = .active
+        if current != sample { current = sample }
+        if state != .active { state = .active }
     }
 
     private func pause(_ newState: State, at time: Date) {
@@ -146,12 +163,12 @@ final class Tracker: ObservableObject {
         } catch {
             lastError = L.tr("Не удалось записать: \(error)", "Could not record: \(error)")
         }
-        current = nil
-        state = newState
+        if current != nil { current = nil }
+        if state != newState { state = newState }
     }
 
     private func refreshToday(_ now: Date) {
-        if let total = try? store.total(on: now) { todayTotal = total }
+        if let total = try? store.total(on: now), total != todayTotal { todayTotal = total }
     }
 
     private func observeSystem() {
@@ -175,8 +192,15 @@ final class Tracker: ObservableObject {
         on(workspace, NSWorkspace.sessionDidBecomeActiveNotification) { $0.screenLocked = false }
         on(distributed, Notification.Name("com.apple.screenIsLocked")) { $0.screenLocked = true }
         on(distributed, Notification.Name("com.apple.screenIsUnlocked")) { $0.screenLocked = false }
-        // Record app switches immediately instead of waiting for the next tick.
-        on(workspace, NSWorkspace.didActivateApplicationNotification) { _ in }
+        // Record app switches immediately instead of waiting for the next tick (but rapid ⌘-Tab doesn't run a tick
+        // per app: at most one a second).
+        let observer = workspace.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil,
+                                             queue: .main) { [weak self] _ in
+            guard let self else { return }
+            if let last = self.lastTick, Date().timeIntervalSince(last) < 1 { return }
+            self.tick()
+        }
+        observers.append((workspace, observer))
     }
 }
 

@@ -91,12 +91,14 @@ enum PrivateWindowDetector {
     static func verdict(for pid: pid_t, bundleID: String) -> Verdict {
         guard AXIsProcessTrusted() else { return .normal }   // nothing to look at without the permission
         let app = AXUIElementCreateApplication(pid)
-        AXUIElementSetMessagingTimeout(app, 0.3)
+        // Runs on the main thread in the tick: a hung app may cost at most a fraction of a second.
+        AXUIElementSetMessagingTimeout(app, 0.2)
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &value) == .success,
               let value, CFGetTypeID(value) == AXUIElementGetTypeID()
         else { return .normal }
         let window = value as! AXUIElement
+        AXUIElementSetMessagingTimeout(window, 0.2)
 
         // Instant signals. Chromium browsers add " (Incognito)" / « (Инкогнито)» to the window's accessible title;
         // Arc names incognito windows "bigIncognitoBrowserWindow-…".
@@ -132,7 +134,9 @@ enum PrivateWindowDetector {
         AXUIElementSetMessagingTimeout(window, 0.5)
         var queue: [(element: AXUIElement, depth: Int)] = [(window, 0)]
         var visited = 0
-        while !queue.isEmpty && visited < 250 {
+        // The window counts as unknown (not recorded) while it is scanned: never longer than 3 seconds.
+        let deadline = Date().addingTimeInterval(3)
+        while !queue.isEmpty && visited < 250 && Date() < deadline {
             let (element, depth) = queue.removeFirst()
             visited += 1
             let role = text(element, kAXRoleAttribute)
@@ -354,7 +358,8 @@ final class BrowserURLCache {
 
         let entry = entries[key]
         // Without a window title (no Accessibility permission) a new page can't be told apart: refresh more often.
-        let maxAge: TimeInterval = title.isEmpty ? 5 : 15
+        // (Each refresh starts an osascript process: not more often than every 20 s.)
+        let maxAge: TimeInterval = title.isEmpty ? 20 : 15
         if (entry == nil || now.timeIntervalSince(entry!.fetchedAt) > maxAge) && inFlight[key] == nil {
             inFlight[key] = now
             queue.async { [self] in
