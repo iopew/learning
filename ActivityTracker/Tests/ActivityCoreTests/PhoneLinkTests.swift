@@ -20,8 +20,12 @@ final class PhoneLinkTests: XCTestCase {
         paths.append(path)
         let store = try ActivityStore(path: path)
         let now = Calendar.current.startOfDay(for: Date()).addingTimeInterval(12 * 3600)
-        try store.record(Sample(bundleID: "com.apple.Safari", appName: "Safari", title: "Secret title",
-                                url: "https://go.dev/secret/path"), at: now.addingTimeInterval(-120), interval: 5)
+        // Twelve 5-second ticks: one minute in Safari.
+        for tick in 0..<12 {
+            try store.record(Sample(bundleID: "com.apple.Safari", appName: "Safari", title: "Secret title",
+                                    url: "https://go.dev/secret/path"),
+                             at: now.addingTimeInterval(-120 + Double(tick) * 5), interval: 5)
+        }
         try store.endStreak(at: now.addingTimeInterval(-60))
         return try PhoneSnapshot.make(activity: store, network: try NetworkStore(path: path), system: try SystemStore(path: path),
                                       days: DayCalendar(), now: now, macName: "Test Mac", build: 24)

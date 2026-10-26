@@ -2,3 +2,7 @@
 .swiftpm/
 *.xcodeproj
 xcuserdata/
+!Phone/ActivityPhone.xcodeproj
+Phone/ActivityPhone.xcodeproj/xcuserdata/
+Phone/ActivityPhone.xcodeproj/project.xcworkspace/xcuserdata/
+Phone/build/
