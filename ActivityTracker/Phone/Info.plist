@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSCameraUsageDescription</key>
+    <string>Камера нужна только чтобы прочитать QR-код связки на экране Mac. / The camera is only used to read the pairing QR code on the Mac's screen.</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Чтобы найти твой Mac в той же сети (Wi-Fi или режим модема) и забрать с него статистику. / To find your Mac on the same network (Wi-Fi or hotspot) and fetch its statistics.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_activitytrk._tcp</string>
+    </array>
+    <key>BGTaskSchedulerPermittedIdentifiers</key>
+    <array>
+        <string>com.iopew.ActivityPhone.refresh</string>
+    </array>
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>fetch</string>
+    </array>
+    <key>LSSupportsOpeningDocumentsInPlace</key>
+    <false/>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>ActivityTracker snapshot</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.iopew.activitytracker.snapshot</string>
+            </array>
+        </dict>
+    </array>
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.iopew.activitytracker.snapshot</string>
+            <key>UTTypeDescription</key>
+            <string>ActivityTracker snapshot</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.data</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>atsnap</string>
+                </array>
+            </dict>
+        </dict>
+    </array>
+</dict>
+</plist>

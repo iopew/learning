@@ -59,7 +59,11 @@
     <key>NSLocationUsageDescription</key>
     <string>Нужно только для названий Wi-Fi сетей в статистике трафика: macOS отдаёт их приложениям с доступом к геолокации. Координаты не читаются и не сохраняются. / Only for Wi-Fi network names in the traffic statistics: macOS shares them with apps that have Location access. No coordinates are read or stored.</string>
     <key>NSLocalNetworkUsageDescription</key>
-    <string>Раз в минуту проверяется пинг до роутера, чтобы показать качество сети. Больше ничего в локальной сети не трогается. / Once a minute the router is pinged to show network quality. Nothing else on the local network is touched.</string>
+    <string>Раз в минуту проверяется пинг до роутера, чтобы показать качество сети; связанный iPhone забирает статистику по сети. Больше ничего в локальной сети не трогается. / Once a minute the router is pinged to show network quality; the paired iPhone fetches statistics over the network. Nothing else on the local network is touched.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_activitytrk._tcp</string>
+    </array>
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>Нужно только для названий Wi-Fi сетей в статистике трафика: macOS отдаёт их приложениям с доступом к геолокации. Координаты не читаются и не сохраняются. / Only for Wi-Fi network names in the traffic statistics: macOS shares them with apps that have Location access. No coordinates are read or stored.</string>
 </dict>

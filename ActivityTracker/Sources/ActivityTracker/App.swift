@@ -34,6 +34,8 @@ final class AppServices {
     /// Sleep, sleep blockers, startup items, folder sizes, SSD writes.
     let machineStore: MachineStore
     let machine: MachineMonitor
+    /// Answers the paired iPhone.
+    let phone: PhoneServer
     /// The day boundary in use (settings.dayStartHour as it was at launch).
     let days: DayCalendar
     let ui = UIState()
@@ -124,6 +126,11 @@ final class AppServices {
         notifier = Notifier(store: stores.reader, systemStore: stores.systemReader, settings: settings)
         stability = StabilityMonitor(path: url.path, days: days)
         network = NetworkMonitor(store: stores.network)
+        let build = Int(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0
+        phone = PhoneServer { [reader = stores.reader, network = stores.network, system = stores.systemReader] in
+            try PhoneSnapshot.make(activity: reader, network: network, system: system, days: days, now: Date(),
+                                   macName: PhoneServer.computerName, build: build)
+        }
     }
 }
 
@@ -201,6 +208,7 @@ struct ActivityTrackerApp: App {
         services.stability.start()
         services.network.start()
         services.machine.start()
+        services.phone.start()
         ArchiveSession.removeLeftovers()
         scheduleRollUp()
         NotificationCenter.default.addObserver(

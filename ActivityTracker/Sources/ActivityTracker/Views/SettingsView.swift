@@ -163,6 +163,10 @@ struct SettingsView: View {
 
                 Divider()
 
+                PhoneSection(server: AppServices.shared.phone)
+
+                Divider()
+
                 VStack(alignment: .leading, spacing: 4) {
                     Text(L.tr("Диагностика", "Diagnostics")).font(.headline)
                     Button(diagnosticsStatus ?? L.tr("Скопировать сведения об окне (через 5 секунд)", "Copy window details (in 5 seconds)")) {
