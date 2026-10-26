@@ -178,12 +178,10 @@ private struct NetworkCard: View {
     }
 
     private func signalWord(_ rssi: Double) -> String {
-        switch rssi {
-        case -55...: return L.tr("отличный", "excellent")
-        case -67 ..< -55: return L.tr("хороший", "good")
-        case -75 ..< -67: return L.tr("средний", "fair")
-        default: return L.tr("слабый", "weak")
-        }
+        if rssi >= -55 { return L.tr("отличный", "excellent") }
+        if rssi >= -67 { return L.tr("хороший", "good") }
+        if rssi >= -75 { return L.tr("средний", "fair") }
+        return L.tr("слабый", "weak")
     }
 
     private func cell(_ title: String, _ value: String) -> some View {
