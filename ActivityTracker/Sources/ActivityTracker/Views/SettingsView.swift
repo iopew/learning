@@ -60,6 +60,38 @@ struct SettingsView: View {
 
                 Divider()
 
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(L.tr("Уведомления", "Notifications")).font(.headline)
+                    HStack {
+                        Toggle(L.tr("Итог дня в", "Daily summary at"), isOn: $settings.digestEnabled)
+                        Picker(L.tr("Время", "Time"), selection: $settings.digestHour) {
+                            ForEach(18...23, id: \.self) { hour in
+                                Text(String(format: "%02d:00", hour)).tag(hour)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 90)
+                        .disabled(!settings.digestEnabled)
+                    }
+                    Text(L.tr("Одно уведомление вечером: время, главные приложения, лучший фокус. Если Mac был закрыт — придёт утром. По понедельникам — итог недели в сравнении с прошлой.",
+                              "One notification in the evening: time, top apps, best focus. If the Mac was closed, it comes in the morning. On Mondays: the week compared with the one before."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Toggle(L.tr("Напоминать о перерыве", "Remind me to take a break"), isOn: $settings.breakReminders)
+                    Text(L.tr("После 1,5–2 часов работы без перерыва, в естественной паузе (сменил приложение, перестал печатать). Во время звонка молчит.",
+                              "After 1.5–2 hours of work without a break, at a natural pause (you switched apps or stopped typing). Silent during calls."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Divider()
+
+                DayBoundaryNote()
+
+                Divider()
+
                 Toggle(L.tr("Записывать заголовки окон", "Record window titles"), isOn: $settings.recordTitles)
                 if settings.recordTitles && !accessibilityGranted {
                     permissionNote(

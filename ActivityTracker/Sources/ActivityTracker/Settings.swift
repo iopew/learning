@@ -79,6 +79,26 @@ final class Settings: ObservableObject {
     @Published var checkForUpdates: Bool { didSet { defaults.set(checkForUpdates, forKey: Keys.checkForUpdates) } }
     /// Install new builds without asking; otherwise an "Обновить" button appears.
     @Published var autoUpdate: Bool { didSet { defaults.set(autoUpdate, forKey: Keys.autoUpdate) } }
+    /// 0…5: the hour a new day begins (4 = work until 03:59 counts for the previous day). Applied at the next start.
+    @Published var dayStartHour: Int { didSet { defaults.set(dayStartHour, forKey: Keys.dayStartHour) } }
+    /// Evening summary notification and the Monday review of the week.
+    @Published var digestEnabled: Bool {
+        didSet {
+            guard digestEnabled != oldValue else { return }
+            defaults.set(digestEnabled, forKey: Keys.digestEnabled)
+            if digestEnabled { AppServices.shared.notifier.requestPermission() }
+        }
+    }
+    /// Hour of the digest (18…23).
+    @Published var digestHour: Int { didSet { defaults.set(digestHour, forKey: Keys.digestHour) } }
+    /// Suggest a break after 90–120 minutes of work, at a natural pause.
+    @Published var breakReminders: Bool {
+        didSet {
+            guard breakReminders != oldValue else { return }
+            defaults.set(breakReminders, forKey: Keys.breakReminders)
+            if breakReminders { AppServices.shared.notifier.requestPermission() }
+        }
+    }
 
     private enum Keys {
         static let isPaused = "isPaused"
@@ -93,6 +113,10 @@ final class Settings: ObservableObject {
         static let menuBarStyle = "menuBarStyle"
         static let checkForUpdates = "checkForUpdates"
         static let autoUpdate = "autoUpdate"
+        static let dayStartHour = "dayStartHour"
+        static let digestEnabled = "digestEnabled"
+        static let digestHour = "digestHour"
+        static let breakReminders = "breakReminders"
         static let loginItemConfigured = "loginItemConfigured"
         static let accessibilityPromptVersion = "accessibilityPromptVersion"
     }
@@ -112,6 +136,10 @@ final class Settings: ObservableObject {
             Keys.menuBarStyle: MenuBarStyle.icon.rawValue,
             Keys.checkForUpdates: true,
             Keys.autoUpdate: true,
+            Keys.dayStartHour: 4,
+            Keys.digestEnabled: true,
+            Keys.digestHour: 21,
+            Keys.breakReminders: true,
         ])
         isPaused = defaults.bool(forKey: Keys.isPaused)
         idleThreshold = defaults.double(forKey: Keys.idleThreshold)
@@ -125,6 +153,10 @@ final class Settings: ObservableObject {
         menuBarStyle = MenuBarStyle(rawValue: defaults.string(forKey: Keys.menuBarStyle) ?? "") ?? .icon
         checkForUpdates = defaults.bool(forKey: Keys.checkForUpdates)
         autoUpdate = defaults.bool(forKey: Keys.autoUpdate)
+        dayStartHour = min(max(defaults.integer(forKey: Keys.dayStartHour), 0), 5)
+        digestEnabled = defaults.bool(forKey: Keys.digestEnabled)
+        digestHour = min(max(defaults.integer(forKey: Keys.digestHour), 18), 23)
+        breakReminders = defaults.bool(forKey: Keys.breakReminders)
     }
 
     func applyAppearance() {

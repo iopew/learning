@@ -7,20 +7,23 @@ struct HourlyChart: View {
     let slices: [HourSlice]
     let colors: AppColors
     var height: CGFloat = 130
+    /// Clock hour of slice 0 (the day may begin at 04:00).
+    var firstHour = 0
 
-    private static let hours = (0..<24).map { String(format: "%02d", $0) }
+    private var hours: [String] { (0..<24).map { String(format: "%02d", ($0 + firstHour) % 24) } }
 
     var body: some View {
+        let hours = self.hours
         Chart(slices) { slice in
             BarMark(
-                x: .value(L.tr("Час", "Hour"), Self.hours[slice.hour]),
+                x: .value(L.tr("Час", "Hour"), hours[slice.hour % 24]),
                 y: .value(L.tr("Минуты", "Minutes"), slice.seconds / 60)
             )
             .foregroundStyle(colors.color(slice.bundleID))
         }
-        .chartXScale(domain: Self.hours)
+        .chartXScale(domain: hours)
         .chartXAxis {
-            AxisMarks(values: stride(from: 0, to: 24, by: 3).map { Self.hours[$0] })
+            AxisMarks(values: stride(from: 0, to: 24, by: 3).map { hours[$0] })
         }
         .chartYScale(domain: 0.0...60.0)
         .chartYAxis {
@@ -85,6 +88,8 @@ struct MinuteGrid: View {
     let minutes: [MinuteCell?]
     let colors: AppColors
     var rowHeight: CGFloat = 7
+    /// Clock hour of the first row.
+    var firstHour = 0
 
     @State private var hovered: Int?
     private let labelWidth: CGFloat = 20
@@ -107,7 +112,7 @@ struct MinuteGrid: View {
                         let y = CGFloat(hour) * rowHeight
                         if hour % 3 == 0 {
                             context.draw(
-                                Text(String(format: "%02d", hour)).font(.system(size: min(10, rowHeight))).foregroundColor(.secondary),
+                                Text(String(format: "%02d", (hour + firstHour) % 24)).font(.system(size: min(10, rowHeight))).foregroundColor(.secondary),
                                 at: CGPoint(x: 0, y: y + rowHeight / 2), anchor: .leading)
                         }
                         for minute in 0..<60 {
@@ -137,7 +142,7 @@ struct MinuteGrid: View {
 
     private var hoverText: String {
         guard let hovered else { return L.tr("наведите на клетку", "hover over a cell") }
-        let time = String(format: "%02d:%02d", hovered / 60, hovered % 60)
+        let time = String(format: "%02d:%02d", (hovered / 60 + firstHour) % 24, hovered % 60)
         guard hovered < minutes.count, let cell = minutes[hovered] else { return "\(time) · —" }
         return "\(time) · \(cell.appName) · \(Format.duration(cell.seconds))"
     }

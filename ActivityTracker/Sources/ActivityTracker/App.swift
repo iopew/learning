@@ -21,14 +21,23 @@ final class AppServices {
     let windowStats: StatsModel
     let updater: Updater
     let sampler: SystemSampler
+    let notifier: Notifier
+    let insights: InsightsModel
+    let stability: StabilityMonitor
+    /// The day boundary in use (settings.dayStartHour as it was at launch).
+    let days: DayCalendar
     let ui = UIState()
     let databaseURL: URL
     let startupError: String?
 
     private init() {
+        settings = Settings()
+        L.current = L.resolve(settings.language)
+
         var calendar = Calendar.current
         calendar.firstWeekday = 2   // weeks start on Monday
-        let days = DayCalendar(calendar: calendar)
+        let days = DayCalendar(calendar: calendar, startHour: settings.dayStartHour)
+        self.days = days
 
         typealias Stores = (recorder: ActivityStore, reader: ActivityStore, systemRecorder: SystemStore,
                             systemReader: SystemStore)
@@ -50,16 +59,28 @@ final class AppServices {
             stores = try! open(url)
             problem = L.tr("Основная база недоступна (\(error)). Данные пишутся во временный файл.", "The main database is unavailable (\(error)). Data goes to a temporary file.")
         }
+        // The day boundary changed since the data was written: move every row to its new day once.
+        let appliedKey = "dayStartHourApplied"
+        if UserDefaults.standard.integer(forKey: appliedKey) != days.startHour {
+            do {
+                let moved = try stores.recorder.rekeyDays() + stores.systemRecorder.rekeyDays()
+                UserDefaults.standard.set(days.startHour, forKey: appliedKey)
+                NSLog("ActivityTracker: day boundary \(days.startHour):00, \(moved) rows moved")
+            } catch {
+                problem = problem ?? L.tr("Не удалось пересчитать дни: \(error)", "Could not recompute days: \(error)")
+            }
+        }
         databaseURL = url
         startupError = problem
 
-        settings = Settings()
-        L.current = L.resolve(settings.language)
         tracker = Tracker(store: stores.recorder, settings: settings)
         menuStats = StatsModel(store: stores.reader, systemStore: stores.systemReader)
         windowStats = StatsModel(store: stores.reader, systemStore: stores.systemReader)
         updater = Updater(settings: settings)
         sampler = SystemSampler(store: stores.systemRecorder)
+        insights = InsightsModel(store: stores.reader)
+        notifier = Notifier(store: stores.reader, systemStore: stores.systemReader, settings: settings)
+        stability = StabilityMonitor(path: url.path, days: days)
     }
 }
 
@@ -87,6 +108,12 @@ struct ActivityTrackerApp: App {
         }
         if let zip = argument(after: "--update-from-zip") {
             exit(Installer.updateFromZip(URL(fileURLWithPath: zip)))
+        }
+
+        // Restart (after changing the day boundary): let the previous instance quit before touching the database.
+        if let pidText = argument(after: "--wait-for-pid"), let pid = pid_t(pidText) {
+            let deadline = Date().addingTimeInterval(15)
+            while kill(pid, 0) == 0 && Date() < deadline { Thread.sleep(forTimeInterval: 0.1) }
         }
 
         // A hand-installed (ad-hoc signed) copy re-signs itself once with the stable local identity and restarts.
@@ -118,6 +145,11 @@ struct ActivityTrackerApp: App {
         services.tracker.start()
         services.sampler.start()
         services.updater.start()
+        services.tracker.onTick = { [weak notifier = services.notifier] state, bundleID, now in
+            notifier?.trackerTicked(state: state, bundleID: bundleID, now: now)
+        }
+        services.notifier.start()
+        services.stability.start()
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
         ) { _ in

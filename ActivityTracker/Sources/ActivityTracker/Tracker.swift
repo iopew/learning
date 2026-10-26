@@ -18,6 +18,8 @@ final class Tracker: ObservableObject {
     @Published private(set) var current: Sample?
     @Published private(set) var todayTotal: TimeInterval = 0
     @Published private(set) var lastError: String?
+    /// Called at the end of every tick (break reminders).
+    var onTick: ((State, String?, Date) -> Void)?
 
     private let store: ActivityStore
     private let settings: Settings
@@ -76,7 +78,10 @@ final class Tracker: ObservableObject {
 
     func tick() {
         let now = Date()
-        defer { refreshToday(now) }
+        defer {
+            refreshToday(now)
+            onTick?(state, current?.bundleID, now)
+        }
 
         if settings.isPaused { return pause(.paused, at: now) }
         if screenLocked || asleep { return pause(.away, at: now) }

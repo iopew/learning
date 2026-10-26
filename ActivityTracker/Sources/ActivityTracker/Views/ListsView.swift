@@ -5,6 +5,7 @@ import ActivityCore
 struct AppsList: View {
     let report: Report
     let colors: AppColors
+    var onTrend: ((UsageTarget, String) -> Void)?
 
     @State private var expanded: Set<String> = []
     @State private var hovered: String?
@@ -32,6 +33,9 @@ struct AppsList: View {
                         if inside { hovered = app.bundleID } else if hovered == app.bundleID { hovered = nil }
                     }
                     .contextMenu {
+                        if let onTrend {
+                            Button(L.tr("Тренд за 90 дней", "90-day trend")) { onTrend(.app(app.bundleID), app.appName) }
+                        }
                         Button(L.tr("Удалить все данные о «\(app.appName)»…", "Delete all data about “\(app.appName)”…")) {
                             DataEraser.confirmAndErase(.app(app.bundleID))
                         }
@@ -56,6 +60,7 @@ struct AppsList: View {
 
 struct SitesList: View {
     let report: Report
+    var onTrend: ((UsageTarget, String) -> Void)?
 
     @State private var hovered: String?
 
@@ -75,6 +80,9 @@ struct SitesList: View {
                     if inside { hovered = site.domain } else if hovered == site.domain { hovered = nil }
                 }
                 .contextMenu {
+                    if let onTrend {
+                        Button(L.tr("Тренд за 90 дней", "90-day trend")) { onTrend(.domain(site.domain), site.domain) }
+                    }
                     Button(L.tr("Удалить все данные о \(site.domain)…", "Delete all data about \(site.domain)…")) {
                         DataEraser.confirmAndErase(.domain(site.domain))
                     }

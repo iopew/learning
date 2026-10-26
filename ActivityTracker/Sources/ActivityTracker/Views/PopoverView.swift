@@ -39,7 +39,14 @@ struct PopoverView: View {
                         StatsControls()
                         if let report = stats.report {
                             ReportOverview(report: report, style: .compact)
-                            ReportLists(report: report)
+                            if let switches = stats.switches {
+                                SwitchesCard(stats: switches, lastHour: stats.lastHourSwitches,
+                                             usualPerHour: stats.usualSwitchesPerHour, compact: true)
+                            }
+                            ReportLists(report: report, onTrend: { target, name in
+                                MainWindowController.shared.show()
+                                AppServices.shared.insights.showTrend(target, name: name)
+                            })
                         } else {
                             ReportPlaceholder()
                         }
@@ -197,8 +204,9 @@ struct ReportOverview: View {
         VStack(alignment: .leading, spacing: 14) {
             SummaryRow(report: report)
             if report.range == .day {
-                HourlyChart(slices: report.hourly, colors: colors, height: style.hourlyHeight)
-                MinuteGrid(minutes: report.minutes, colors: colors, rowHeight: style.minuteRowHeight)
+                HourlyChart(slices: report.hourly, colors: colors, height: style.hourlyHeight, firstHour: report.firstHour)
+                MinuteGrid(minutes: report.minutes, colors: colors, rowHeight: style.minuteRowHeight,
+                           firstHour: report.firstHour)
             } else {
                 RangeChart(report: report, height: style.rangeHeight)
             }
@@ -209,6 +217,8 @@ struct ReportOverview: View {
 /// Apps / sites / timeline tabs for a report.
 struct ReportLists: View {
     let report: Report
+    /// "Тренд за 90 дней" from a row's context menu.
+    var onTrend: ((UsageTarget, String) -> Void)?
 
     @State private var tab: ListTab = .apps
 
@@ -239,8 +249,8 @@ struct ReportLists: View {
             .labelsHidden()
 
             switch current {
-            case .apps: AppsList(report: report, colors: colors)
-            case .sites: SitesList(report: report)
+            case .apps: AppsList(report: report, colors: colors, onTrend: onTrend)
+            case .sites: SitesList(report: report, onTrend: onTrend)
             case .timeline: TimelineList(sessions: report.sessions, colors: colors)
             }
         }

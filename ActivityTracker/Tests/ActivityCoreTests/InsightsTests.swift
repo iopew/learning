@@ -158,12 +158,12 @@ final class InsightsTests: XCTestCase {
     func testComparisonAveragesPerCalendarDay() {
         var monday = DayUsage(day: date("2026-10-19 00:00:00"))
         monday.total = 5 * 3600
-        monday.apps = ["code": 4 * 3600, "chat": 3600]
+        monday.apps = ["code": 14400.0, "chat": 3600.0]
         monday.appNames = ["code": "Code", "chat": "Chat"]
-        monday.domains = ["go.dev": 1800]
+        monday.domains = ["go.dev": 1800.0]
         var saturday = DayUsage(day: date("2026-10-24 00:00:00"))
         saturday.total = 2 * 3600
-        saturday.apps = ["video": 2 * 3600]
+        saturday.apps = ["video": 7200.0]
         saturday.appNames = ["video": "Video"]
 
         let comparison = UsageComparison.make(first: [monday], firstDays: 5, second: [saturday], secondDays: 2)

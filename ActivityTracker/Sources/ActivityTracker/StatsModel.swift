@@ -11,6 +11,11 @@ final class StatsModel: ObservableObject {
     @Published private(set) var report: Report?
     @Published private(set) var system: SystemReport?
     @Published private(set) var tips: [Recommendation] = []
+    /// Switching between apps in the period (only for periods up to 30 days: longer ones would be heavy).
+    @Published private(set) var switches: SwitchStats?
+    /// Today only: switches in the last 60 minutes, and the usual rate per hour over the previous two weeks.
+    @Published private(set) var lastHourSwitches: Int?
+    @Published private(set) var usualSwitchesPerHour: Double?
     @Published private(set) var error: String?
 
     let days: DayCalendar
@@ -23,6 +28,8 @@ final class StatsModel: ObservableObject {
     private var followsToday = true
     /// The usual day changes once a day; only touched on `queue`.
     private var baselineCache: (day: String, baseline: UsageBaseline)?
+    /// The usual switches per hour; only touched on `queue`.
+    private var switchBaselineCache: (day: String, perHour: Double?)?
 
     init(store: ActivityStore, systemStore: SystemStore) {
         self.store = store
@@ -31,7 +38,10 @@ final class StatsModel: ObservableObject {
         for name in [Notification.Name.activityDataChanged, .languageChanged] {
             NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 guard let self else { return }
-                queue.async { self.baselineCache = nil }   // deleted data must not linger in the usual day
+                queue.async {   // deleted data must not linger in the usual day
+                    self.baselineCache = nil
+                    self.switchBaselineCache = nil
+                }
                 reload()
             }
         }
@@ -50,27 +60,59 @@ final class StatsModel: ObservableObject {
         generation += 1
         let request = (generation: generation, range: range, anchor: anchor, today: followsToday && isAtToday)
         queue.async { [self] in
-            let result = Result { () -> (Report, SystemReport, [Recommendation]) in
+            let result = Result { () -> Loaded in
                 let report = try store.report(range: request.range, anchor: request.anchor)
                 let system = try systemStore.report(range: request.range, anchor: request.anchor)
                 // Tips are always about today, whatever period the user is looking at.
                 let sameDay = request.today && request.range == .day
                 let tips = try todayTips(dayReport: sameDay ? report : nil, daySystem: sameDay ? system : nil)
-                return (report, system, tips)
+                var loaded = Loaded(report: report, system: system, tips: tips)
+                if let length = request.range.days, length <= 30 {
+                    let spans = try store.spans(from: report.fromDay, to: report.toDay)
+                    loaded.switches = Switches.stats(spans)
+                    if sameDay {
+                        let now = Date()
+                        loaded.lastHour = Switches.stats(Switches.clip(spans, from: now.addingTimeInterval(-3600), to: now)).switches
+                        loaded.usualPerHour = try switchBaseline(today: report.toDay)
+                    }
+                }
+                return loaded
             }
             DispatchQueue.main.async {
                 guard request.generation == self.generation else { return }   // a newer request is in flight
                 switch result {
-                case .success(let (report, system, tips)):
-                    self.report = report
-                    self.system = system
-                    self.tips = tips
+                case .success(let loaded):
+                    self.report = loaded.report
+                    self.system = loaded.system
+                    self.tips = loaded.tips
+                    self.switches = loaded.switches
+                    self.lastHourSwitches = loaded.lastHour
+                    self.usualSwitchesPerHour = loaded.usualPerHour
                     self.error = nil
                 case .failure(let error):
                     self.error = L.tr("Не удалось построить отчёт: \(error)", "Could not build the report: \(error)")
                 }
             }
         }
+    }
+
+    private struct Loaded {
+        var report: Report
+        var system: SystemReport
+        var tips: [Recommendation]
+        var switches: SwitchStats?
+        var lastHour: Int?
+        var usualPerHour: Double?
+    }
+
+    /// Runs on `queue`. Computed once a day from the previous 14 days.
+    private func switchBaseline(today: Date) throws -> Double? {
+        let key = days.key(today)
+        if let cached = switchBaselineCache, cached.day == key { return cached.perHour }
+        let spans = try store.spans(from: days.addingDays(-14, to: today), to: days.addingDays(-1, to: today))
+        let perHour = Switches.stats(spans).perHour
+        switchBaselineCache = (key, perHour)
+        return perHour
     }
 
     /// Runs on `queue`.

@@ -40,7 +40,7 @@ struct ForgetMenu: View {
         Menu {
             Button(L.tr("Последние 15 минут", "Last 15 minutes")) { DataEraser.confirmAndErase(.since(Date().addingTimeInterval(-15 * 60))) }
             Button(L.tr("Последний час", "Last hour")) { DataEraser.confirmAndErase(.since(Date().addingTimeInterval(-3600))) }
-            Button(L.tr("Сегодня", "Today")) { DataEraser.confirmAndErase(.since(Calendar.current.startOfDay(for: Date()))) }
+            Button(L.tr("Сегодня", "Today")) { DataEraser.confirmAndErase(.since(AppServices.shared.days.startOfDay(Date()))) }
             Divider()
             Button(L.tr("Всю историю…", "Entire history…")) { DataEraser.confirmAndErase(.all) }
         } label: {

@@ -50,6 +50,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             .environmentObject(services.settings)
             .environmentObject(services.updater)
             .environmentObject(services.ui)
+            .environmentObject(services.insights)
+            .environmentObject(services.stability)
         let hosting = NSHostingController(rootView: root)
         hosting.sizingOptions = []
 
@@ -75,6 +77,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     static func quitForReal() {
         allowQuit = true
         NSApp.terminate(nil)
+    }
+
+    /// Starts a fresh instance (it waits until this one is gone, then opens the window) and quits.
+    static func restart() {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-n", Bundle.main.bundleURL.path, "--args", "--wait-for-pid", "\(getpid())", "--show-window"]
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            NSLog("ActivityTracker: restart: \(error)")
+            return
+        }
+        quitForReal()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -135,17 +152,21 @@ struct MainWindowView: View {
     @EnvironmentObject private var updater: Updater
 
     @EnvironmentObject private var ui: UIState
+    @EnvironmentObject private var insights: InsightsModel
 
     enum Pane: String, CaseIterable, Identifiable {
-        case activity, battery, system, tips
+        case activity, rhythm, compare, battery, system, stability, tips
 
         var id: String { rawValue }
 
         var title: String {
             switch self {
             case .activity: return L.tr("Активность", "Activity")
+            case .rhythm: return L.tr("Ритм", "Rhythm")
+            case .compare: return L.tr("Сравнение", "Compare")
             case .battery: return L.tr("Батарея", "Battery")
             case .system: return L.tr("Система", "System")
+            case .stability: return L.tr("Стабильность", "Stability")
             case .tips: return L.tr("Советы", "Tips")
             }
         }
@@ -185,11 +206,15 @@ struct MainWindowView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(maxWidth: 520)
+            .frame(maxWidth: 820)
+            .padding(.horizontal, 24)
             .padding(.bottom, 12)
             Divider()
             switch ui.windowPane {
             case .activity: activity
+            case .rhythm: RhythmPane()
+            case .compare: ComparisonPane()
+            case .stability: StabilityPane()
             case .battery: single { if let system = stats.system { BatteryPanel(system: system, chartHeight: 220) } }
             case .system: single { if let system = stats.system { SystemPanel(system: system, chartHeight: 200) } }
             case .tips:
@@ -214,6 +239,9 @@ struct MainWindowView: View {
         .onReceive(tracker.$todayTotal) { _ in
             if MainWindowController.shared.isVisible { stats.refreshIfLive() }
         }
+        .background(Color.clear.sheet(item: $insights.trend) { card in
+            TrendSheet(card: card) { insights.trend = nil }
+        })
         .sheet(isPresented: $ui.windowShowsSettings) {
             VStack(spacing: 0) {
                 SettingsView(databaseURL: databaseURL)
@@ -241,6 +269,10 @@ struct MainWindowView: View {
                     StatsControls()
                     if let report = stats.report {
                         ReportOverview(report: report, style: .wide)
+                        if let switches = stats.switches {
+                            SwitchesCard(stats: switches, lastHour: stats.lastHourSwitches,
+                                         usualPerHour: stats.usualSwitchesPerHour)
+                        }
                     } else {
                         ReportPlaceholder()
                     }
@@ -251,7 +283,7 @@ struct MainWindowView: View {
             Divider()
             ScrollView {
                 if let report = stats.report {
-                    ReportLists(report: report)
+                    ReportLists(report: report, onTrend: { target, name in insights.showTrend(target, name: name) })
                         .padding(20)
                 }
             }
