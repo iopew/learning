@@ -15,6 +15,8 @@ public final class ActivityStore {
     private let db: Database
     private let lock = NSLock()
     private var open: OpenEvent?
+    /// Text → its number in `texts`, for the recorder (cleared on erase and when it grows large).
+    private var textIDs: [String: Int64] = [:]
 
     private struct OpenEvent {
         var id: Int64
@@ -38,12 +40,47 @@ public final class ActivityStore {
                 end_at REAL NOT NULL,
                 bundle_id TEXT NOT NULL,
                 app TEXT NOT NULL,
-                title TEXT NOT NULL DEFAULT '',
-                url TEXT NOT NULL DEFAULT '',
+                title_id INTEGER NOT NULL DEFAULT 0,
+                url_id INTEGER NOT NULL DEFAULT 0,
                 domain TEXT NOT NULL DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS events_day ON events(day);
+            CREATE TABLE IF NOT EXISTS texts(
+                id INTEGER PRIMARY KEY,
+                value TEXT NOT NULL UNIQUE
+            );
             """)
+        try Self.upgradeTexts(db)
+    }
+
+    /// Before build 17 every event stored its window title and URL in full, although the same ones repeat
+    /// hundreds of times a day. Each distinct text is now stored once in `texts` and events keep its number
+    /// (0 = none). Runs once per database; the file is compacted afterwards.
+    static func upgradeTexts(_ db: Database) throws {
+        let columns = try db.columns(of: "events")
+        guard columns.contains("title") else { return }
+        try db.execute("BEGIN")
+        do {
+            if !columns.contains("title_id") {
+                try db.execute("""
+                    ALTER TABLE events ADD COLUMN title_id INTEGER NOT NULL DEFAULT 0;
+                    ALTER TABLE events ADD COLUMN url_id INTEGER NOT NULL DEFAULT 0;
+                    """)
+            }
+            try db.execute("""
+                INSERT OR IGNORE INTO texts(value) SELECT DISTINCT title FROM events WHERE title != '';
+                INSERT OR IGNORE INTO texts(value) SELECT DISTINCT url FROM events WHERE url != '';
+                UPDATE events SET title_id = (SELECT id FROM texts WHERE value = events.title) WHERE title != '';
+                UPDATE events SET url_id = (SELECT id FROM texts WHERE value = events.url) WHERE url != '';
+                ALTER TABLE events DROP COLUMN title;
+                ALTER TABLE events DROP COLUMN url;
+                """)
+            try db.execute("COMMIT")
+        } catch {
+            try? db.execute("ROLLBACK")
+            throw error
+        }
+        try db.execute("PRAGMA wal_checkpoint(TRUNCATE); VACUUM;")
     }
 
     /// ~/Library/Application Support/ActivityTracker/activity.sqlite
@@ -78,12 +115,24 @@ public final class ActivityStore {
             try updateEnd(of: current)
         }
 
+        let titleID = try textID(sample.title)
+        let urlID = try textID(sample.url)
         try db.run(
-            "INSERT INTO events(day, start_at, end_at, bundle_id, app, title, url, domain) VALUES(?,?,?,?,?,?,?,?)",
+            "INSERT INTO events(day, start_at, end_at, bundle_id, app, title_id, url_id, domain) VALUES(?,?,?,?,?,?,?,?)",
             [.text(day), .double(time.timeIntervalSince1970), .double(creditedEnd.timeIntervalSince1970),
-             .text(sample.bundleID), .text(sample.appName), .text(sample.title), .text(sample.url),
-             .text(sample.domain)])
+             .text(sample.bundleID), .text(sample.appName), .int(titleID), .int(urlID), .text(sample.domain)])
         open = OpenEvent(id: db.lastInsertRowID, sample: sample, day: day, start: time, end: creditedEnd)
+    }
+
+    /// The number of `text` in `texts` (added if new); 0 for an empty text. Called with the lock held.
+    private func textID(_ text: String) throws -> Int64 {
+        guard !text.isEmpty else { return 0 }
+        if let id = textIDs[text] { return id }
+        try db.run("INSERT OR IGNORE INTO texts(value) VALUES(?)", [.text(text)])
+        let id = try db.query("SELECT id FROM texts WHERE value = ?", [.text(text)]) { $0.int(0) }.first ?? 0
+        if textIDs.count >= 5000 { textIDs.removeAll() }
+        textIDs[text] = id
+        return id
     }
 
     /// Stops the current streak (idle, sleep, screen lock, pause). Time credited past `time` is taken back.
@@ -184,7 +233,12 @@ public final class ActivityStore {
             try db.run("DELETE FROM events")
             affected = db.changes
         }
-        try db.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+        // Titles and addresses nobody refers to any more are deleted too (privacy: nothing of a deleted site stays).
+        textIDs.removeAll()
+        try db.execute("""
+            DELETE FROM texts WHERE id NOT IN (SELECT title_id FROM events) AND id NOT IN (SELECT url_id FROM events);
+            PRAGMA wal_checkpoint(TRUNCATE);
+            """)
         return affected
     }
 
@@ -249,7 +303,11 @@ public final class ActivityStore {
 
     private func eventsLocked(dayKey: String) throws -> [ActivityEvent] {
         try db.query(
-            "SELECT id, start_at, end_at, bundle_id, app, title, url, domain FROM events WHERE day = ? ORDER BY start_at",
+            """
+            SELECT e.id, e.start_at, e.end_at, e.bundle_id, e.app, COALESCE(t.value, ''), COALESCE(u.value, ''), e.domain
+            FROM events e LEFT JOIN texts t ON t.id = e.title_id LEFT JOIN texts u ON u.id = e.url_id
+            WHERE e.day = ? ORDER BY e.start_at
+            """,
             [.text(dayKey)]
         ) { row in
             ActivityEvent(
@@ -349,9 +407,11 @@ public final class ActivityStore {
         }
         let raw = try db.query(
             """
-            SELECT title, SUM(end_at - start_at) AS seconds FROM events
-            WHERE day BETWEEN ? AND ? AND \(column) = ? AND title != ''
-            GROUP BY title ORDER BY seconds DESC LIMIT 60
+            SELECT t.value, s.seconds FROM (
+                SELECT title_id, SUM(end_at - start_at) AS seconds FROM events
+                WHERE day BETWEEN ? AND ? AND \(column) = ? AND title_id != 0
+                GROUP BY title_id ORDER BY seconds DESC LIMIT 60
+            ) s JOIN texts t ON t.id = s.title_id
             """, params
         ) { (TitleCleaner.clean($0.text(0)), $0.double(1)) }
         // Titles that differ only by a notification counter ("(3) …") are one title.
@@ -428,9 +488,11 @@ public final class ActivityStore {
         for index in apps.indices.prefix(15) {
             apps[index].topTitles = try db.query(
                 """
-                SELECT title, \(duration) AS seconds FROM events
-                WHERE day BETWEEN ? AND ? AND bundle_id = ? AND title != ''
-                GROUP BY title ORDER BY seconds DESC LIMIT 5
+                SELECT t.value, s.seconds FROM (
+                    SELECT title_id, \(duration) AS seconds FROM events
+                    WHERE day BETWEEN ? AND ? AND bundle_id = ? AND title_id != 0
+                    GROUP BY title_id ORDER BY seconds DESC LIMIT 5
+                ) s JOIN texts t ON t.id = s.title_id ORDER BY s.seconds DESC
                 """, window + [.text(apps[index].bundleID)]
             ) { TitleUsage(title: $0.text(0), seconds: $0.double(1)) }
         }

@@ -36,6 +36,11 @@ final class Database {
     /// Rows changed by the last INSERT / UPDATE / DELETE.
     var changes: Int { Int(sqlite3_changes(handle)) }
 
+    /// Column names of a table (for schema upgrades).
+    func columns(of table: String) throws -> Set<String> {
+        Set(try query("PRAGMA table_info(\(table))") { $0.text(1) })
+    }
+
     func execute(_ sql: String) throws {
         var error: UnsafeMutablePointer<CChar>?
         guard sqlite3_exec(handle, sql, nil, nil, &error) == SQLITE_OK else {

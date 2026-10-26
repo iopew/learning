@@ -152,6 +152,66 @@ public final class NetworkStore {
             );
             CREATE INDEX IF NOT EXISTS network_samples_day ON network_samples(day);
             """)
+        // Hourly roll-ups of old minutes keep their outage time and count (`online` is per minute only).
+        if !(try db.columns(of: "network_samples")).contains("rolled") {
+            try db.execute("""
+                ALTER TABLE network_samples ADD COLUMN rolled INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE network_samples ADD COLUMN offline_seconds REAL;
+                ALTER TABLE network_samples ADD COLUMN outage_count INTEGER;
+                """)
+        }
+    }
+
+    /// Minutes before `moment` become one row per hour and network: traffic, busy time, peaks and outages stay
+    /// exact, link / signal / ping / loss become time-weighted averages. Returns the number of minutes folded.
+    @discardableResult
+    public func rollUp(before moment: Date) throws -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let cutoff = SQLValue.double((moment.timeIntervalSince1970 / 3600).rounded(.down) * 3600)
+        let count = try db.query("SELECT COUNT(*) FROM network_samples WHERE rolled = 0 AND at < ?", [cutoff]) { Int($0.int(0)) }.first ?? 0
+        guard count > 0 else { return 0 }
+        func average(_ column: String) -> String {
+            "SUM(\(column) * interval) / SUM(CASE WHEN \(column) IS NOT NULL THEN interval END) AS \(column)"
+        }
+        try db.execute("BEGIN")
+        do {
+            try db.run("DROP TABLE IF EXISTS temp.network_rollup")
+            try db.run("""
+                CREATE TEMP TABLE network_rollup AS
+                WITH m AS (
+                    SELECT *, LAG(online) OVER (PARTITION BY network ORDER BY at) AS previous_online,
+                           at - LAG(at) OVER (PARTITION BY network ORDER BY at) AS dt
+                    FROM network_samples WHERE rolled = 0 AND at < ?
+                )
+                SELECT MIN(at) AS at, MIN(day) AS day, network, SUM(interval) AS interval, SUM(rx) AS rx, SUM(tx) AS tx,
+                       MAX(peak_rx) AS peak_rx, MAX(peak_tx) AS peak_tx, SUM(busy_rx_bytes) AS busy_rx_bytes,
+                       SUM(busy_rx_seconds) AS busy_rx_seconds, SUM(busy_tx_bytes) AS busy_tx_bytes,
+                       SUM(busy_tx_seconds) AS busy_tx_seconds, \(average("link_rate")), \(average("rssi")),
+                       \(average("ping_router")), \(average("ping_internet")), \(average("loss")),
+                       SUM(CASE WHEN online = 0 THEN interval ELSE 0 END) AS offline_seconds,
+                       SUM(CASE WHEN online = 0 AND (previous_online IS NULL OR previous_online != 0 OR dt > 90)
+                                THEN 1 ELSE 0 END) AS outage_count
+                FROM m GROUP BY CAST(at / 3600 AS INTEGER), network
+                """, [cutoff])
+            try db.run("DELETE FROM network_samples WHERE rolled = 0 AND at < ?", [cutoff])
+            try db.run("""
+                INSERT INTO network_samples(at, day, network, interval, rx, tx, peak_rx, peak_tx, busy_rx_bytes,
+                    busy_rx_seconds, busy_tx_bytes, busy_tx_seconds, link_rate, rssi, ping_router, ping_internet, loss,
+                    online, rolled, offline_seconds, outage_count)
+                SELECT at, day, network, interval, rx, tx, peak_rx, peak_tx, busy_rx_bytes, busy_rx_seconds, busy_tx_bytes,
+                       busy_tx_seconds, link_rate, rssi, ping_router, ping_internet, loss, NULL, 1, offline_seconds,
+                       outage_count
+                FROM temp.network_rollup
+                """)
+            try db.run("DROP TABLE temp.network_rollup")
+            try db.execute("COMMIT")
+        } catch {
+            try? db.execute("ROLLBACK")
+            throw error
+        }
+        return count
     }
 
     public func record(_ sample: NetworkSample) throws {
@@ -242,13 +302,20 @@ public final class NetworkStore {
             names[key] = (custom.isEmpty ? name : custom, NetworkInfo.Kind(rawValue: kind) ?? .other)
         }
 
+        // Rolled-up hours stand for many minutes: averages are weighted by time.
+        func weighted(_ column: String) -> String {
+            "SUM(\(column) * interval) / SUM(CASE WHEN \(column) IS NOT NULL THEN interval END)"
+        }
+        var rolledOutages: [String: Int] = [:]
         var networks = try db.query(
             """
             SELECT network, SUM(rx), SUM(tx), SUM(interval), MAX(peak_rx), MAX(peak_tx),
                    SUM(busy_rx_bytes), SUM(busy_rx_seconds), SUM(busy_tx_bytes), SUM(busy_tx_seconds),
-                   AVG(link_rate), AVG(rssi), AVG(ping_router), AVG(ping_internet), AVG(loss),
-                   SUM(CASE WHEN online = 0 THEN interval ELSE 0 END), MIN(at), MAX(at),
-                   COUNT(link_rate), COUNT(rssi), COUNT(ping_router), COUNT(ping_internet), COUNT(loss)
+                   \(weighted("link_rate")), \(weighted("rssi")), \(weighted("ping_router")),
+                   \(weighted("ping_internet")), \(weighted("loss")),
+                   SUM(CASE WHEN online = 0 THEN interval ELSE 0 END) + COALESCE(SUM(offline_seconds), 0), MIN(at), MAX(at),
+                   COUNT(link_rate), COUNT(rssi), COUNT(ping_router), COUNT(ping_internet), COUNT(loss),
+                   COALESCE(SUM(outage_count), 0)
             FROM network_samples WHERE day BETWEEN ? AND ? GROUP BY network
             """, window
         ) { row -> NetworkUsage in
@@ -257,6 +324,7 @@ public final class NetworkStore {
                 row.double(seconds) >= 5 ? row.double(bytes) / row.double(seconds) : nil
             }
             let key = row.text(0)
+            rolledOutages[key] = Int(row.int(23))
             return NetworkUsage(
                 key: key, name: names[key]?.0 ?? key, kind: names[key]?.1 ?? .other,
                 rx: row.double(1), tx: row.double(2), connected: row.double(3),
@@ -283,7 +351,7 @@ public final class NetworkStore {
             lastOffline[key] = at
         }
         for index in networks.indices {
-            networks[index].outages = outageCounts[networks[index].key] ?? 0
+            networks[index].outages = (outageCounts[networks[index].key] ?? 0) + (rolledOutages[networks[index].key] ?? 0)
         }
         networks.sort { $0.total > $1.total || ($0.total == $1.total && $0.name < $1.name) }
 

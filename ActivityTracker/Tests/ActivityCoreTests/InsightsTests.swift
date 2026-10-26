@@ -520,3 +520,127 @@ final class NetworkAndDatabaseTests: XCTestCase {
         XCTAssertEqual(Format.milliseconds(23.4), "23 мс")
     }
 }
+
+final class CompactStorageTests: XCTestCase {
+    private var calendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Tashkent")!
+        calendar.firstWeekday = 2
+        return calendar
+    }()
+    private var paths: [String] = []
+
+    override func setUp() {
+        L.current = .ru
+    }
+
+    override func tearDown() {
+        for path in paths {
+            for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: path + suffix) }
+        }
+        paths = []
+    }
+
+    private func tempPath() -> String {
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).sqlite").path
+        paths.append(path)
+        return path
+    }
+
+    private func date(_ text: String) -> Date {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter.date(from: text)!
+    }
+
+    func testOldDatabaseIsUpgradedToSharedTexts() throws {
+        let path = tempPath()
+        let start = date("2026-10-21 10:00:00").timeIntervalSince1970
+        do {
+            let db = try Database(path: path)
+            try db.execute("""
+                CREATE TABLE events(id INTEGER PRIMARY KEY, day TEXT NOT NULL, start_at REAL NOT NULL, end_at REAL NOT NULL,
+                    bundle_id TEXT NOT NULL, app TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', url TEXT NOT NULL DEFAULT '',
+                    domain TEXT NOT NULL DEFAULT '');
+                """)
+            for index in 0..<3 {
+                try db.run("INSERT INTO events(day, start_at, end_at, bundle_id, app, title, url, domain) VALUES(?,?,?,?,?,?,?,?)",
+                           [.text("2026-10-21"), .double(start + Double(index * 10)), .double(start + Double(index * 10 + 10)),
+                            .text("com.apple.Safari"), .text("Safari"), .text("Go Tour"), .text("https://go.dev/tour"),
+                            .text("go.dev")])
+            }
+        }
+        let store = try ActivityStore(path: path, days: DayCalendar(calendar: calendar))
+        let events = try store.events(on: date("2026-10-21 12:00:00"))
+        XCTAssertEqual(events.count, 3)
+        XCTAssertEqual(events.map(\.title), ["Go Tour", "Go Tour", "Go Tour"])
+        XCTAssertEqual(events.first?.url, "https://go.dev/tour")
+        let report = try store.report(range: .day, anchor: date("2026-10-21 12:00:00"))
+        XCTAssertEqual(report.apps.first?.topTitles, [TitleUsage(title: "Go Tour", seconds: 30)])
+
+        // New records reuse the same text; a second open does nothing.
+        try store.record(Sample(bundleID: "com.apple.Safari", appName: "Safari", title: "Go Tour", url: "https://go.dev/tour"),
+                         at: date("2026-10-21 11:00:00"), interval: 5)
+        let db = try Database(path: path)
+        XCTAssertEqual(try db.query("SELECT COUNT(*) FROM texts") { $0.int(0) }.first, 2)
+        XCTAssertFalse(try db.columns(of: "events").contains("title"))
+        _ = try ActivityStore(path: path, days: DayCalendar(calendar: calendar))
+
+        // Deleting the site deletes its title and address too.
+        try store.erase(.domain("go.dev"))
+        XCTAssertEqual(try db.query("SELECT COUNT(*) FROM texts") { $0.int(0) }.first, 0)
+    }
+
+    func testSystemRollUpKeepsTotals() throws {
+        let days = DayCalendar(calendar: calendar)
+        let store = try SystemStore(path: tempPath(), days: days)
+        let start = date("2026-07-01 10:00:00")
+        // Two hours on battery, draining 0.5% a minute, CPU 10% then 30%.
+        for minute in 0..<120 {
+            let sample = SystemSample(at: start.addingTimeInterval(Double(minute) * 60),
+                                      batteryPercent: 100 - Double(minute) * 0.5, onAC: false, batteryWatts: -10,
+                                      cpuLoad: minute < 60 ? 0.1 : 0.3, memoryUsed: 8e9, memoryTotal: 16e9,
+                                      diskFree: 100e9, diskTotal: 500e9)
+            try store.record(sample, interval: 60, energy: [])
+        }
+        let anchor = date("2026-07-01 12:00:00")
+        let before = try store.report(range: .day, anchor: anchor)
+        XCTAssertEqual(try store.rollUp(before: date("2026-10-01 00:00:00")), 120)
+        XCTAssertEqual(try store.rollUp(before: date("2026-10-01 00:00:00")), 0)
+        let after = try store.report(range: .day, anchor: anchor)
+        XCTAssertEqual(after.timeOnBattery, before.timeOnBattery)
+        XCTAssertEqual(after.drainPerHour!, before.drainPerHour!, accuracy: 0.01)
+        XCTAssertEqual(after.cpuAverage!, 0.2, accuracy: 0.0001)
+        XCTAssertEqual(after.averageDischargeWatts!, 10, accuracy: 0.0001)
+        XCTAssertEqual(after.batteryPoints.count, 3)   // hour 10 splits at 99%: full and not full
+    }
+
+    func testNetworkRollUpKeepsTrafficAndOutages() throws {
+        let days = DayCalendar(calendar: calendar)
+        let store = try NetworkStore(path: tempPath(), days: days)
+        let home = NetworkInfo(key: "wifi:Home", name: "Home", kind: .wifi)
+        let start = date("2026-07-01 10:00:00")
+        for minute in 0..<120 {
+            var sample = NetworkSample(at: start.addingTimeInterval(Double(minute) * 60), interval: 60, network: home)
+            sample.rx = 1000
+            sample.pingInternet = minute < 60 ? 10 : 30
+            // Two outages: minutes 5–6 and 70.
+            sample.online = !(minute == 5 || minute == 6 || minute == 70)
+            try store.record(sample)
+        }
+        let anchor = date("2026-07-01 12:00:00")
+        let before = try store.report(range: .day, anchor: anchor)
+        XCTAssertEqual(before.networks.first?.outages, 2)
+        XCTAssertEqual(try store.rollUp(before: date("2026-10-01 00:00:00")), 120)
+        let after = try store.report(range: .day, anchor: anchor)
+        let usage = try XCTUnwrap(after.networks.first)
+        XCTAssertEqual(usage.rx, 120_000)
+        XCTAssertEqual(usage.connected, 7200)
+        XCTAssertEqual(usage.outages, 2)
+        XCTAssertEqual(usage.outageTime, 180)
+        XCTAssertEqual(usage.pingInternet!, 20, accuracy: 0.0001)
+        XCTAssertEqual(after.buckets.count, 2)
+    }
+}

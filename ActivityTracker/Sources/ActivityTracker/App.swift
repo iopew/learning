@@ -29,6 +29,8 @@ final class AppServices {
     let networkStore: NetworkStore
     /// A reader connection for database tools (size, download, compact).
     let database: ActivityStore
+    /// The writer of the battery/system history (for the hourly roll-up).
+    let systemStore: SystemStore
     /// The day boundary in use (settings.dayStartHour as it was at launch).
     let days: DayCalendar
     let ui = UIState()
@@ -82,6 +84,7 @@ final class AppServices {
         tracker = Tracker(store: stores.recorder, settings: settings)
         networkStore = stores.network
         database = stores.reader
+        systemStore = stores.systemRecorder
         menuStats = StatsModel(store: stores.reader, systemStore: stores.systemReader, networkStore: stores.network)
         windowStats = StatsModel(store: stores.reader, systemStore: stores.systemReader, networkStore: stores.network)
         updater = Updater(settings: settings)
@@ -160,11 +163,36 @@ struct ActivityTrackerApp: App {
         services.notifier.start()
         services.stability.start()
         services.network.start()
+        scheduleRollUp()
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
         ) { _ in
             services.tracker.stop()
         }
+    }
+
+    /// Once a day (first 3 minutes after start): minutes of battery/system and network history older than 90 days
+    /// become hourly rows. Keeps the database at tens of MB a year instead of hundreds.
+    private static func scheduleRollUp() {
+        let services = AppServices.shared
+        let queue = DispatchQueue(label: "ActivityTracker.maintenance", qos: .background)
+        func run() {
+            queue.async {
+                let days = services.days
+                let cutoff = days.addingDays(-90, to: days.startOfDay(Date()))
+                do {
+                    let system = try services.systemStore.rollUp(before: cutoff)
+                    let network = try services.networkStore.rollUp(before: cutoff)
+                    if system + network > 0 { NSLog("ActivityTracker: rolled up \(system) system and \(network) network minutes") }
+                } catch {
+                    NSLog("ActivityTracker: roll-up: \(error)")
+                }
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 180) { run() }
+        let timer = Timer(timeInterval: 24 * 3600, repeats: true) { _ in run() }
+        timer.tolerance = 600
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     var body: some Scene {

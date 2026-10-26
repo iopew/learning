@@ -56,6 +56,15 @@ public final class SystemStore {
             );
             CREATE INDEX IF NOT EXISTS charge_events_day ON charge_events(day);
             """)
+        // Hourly roll-ups of old minutes (see rollUp): a mark, and the battery drain they stood for.
+        let columns = try db.columns(of: "system_samples")
+        if !columns.contains("rolled") {
+            try db.execute("""
+                ALTER TABLE system_samples ADD COLUMN rolled INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE system_samples ADD COLUMN drain_pct REAL;
+                ALTER TABLE system_samples ADD COLUMN drain_sec REAL;
+                """)
+        }
         lastOnAC = try db.query("SELECT on_ac FROM system_samples ORDER BY at DESC LIMIT 1") { $0.int(0) != 0 }.first
     }
 
@@ -70,6 +79,58 @@ public final class SystemStore {
             moved += try ActivityStore.rekey(db: db, table: table, idColumn: "rowid", timeColumn: time, days: days)
         }
         return moved
+    }
+
+    /// Minutes before `moment` become hourly rows (one per hour and state: on battery or not, charging, full,
+    /// hot), so a year of history takes ~60 times less space. Totals, time on battery / full / hot and the battery
+    /// drain stay exact; averages are weighted by time. Returns the number of minutes folded.
+    @discardableResult
+    public func rollUp(before moment: Date) throws -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let cutoff = SQLValue.double((moment.timeIntervalSince1970 / 3600).rounded(.down) * 3600)
+        let count = try db.query("SELECT COUNT(*) FROM system_samples WHERE rolled = 0 AND at < ?", [cutoff]) { Int($0.int(0)) }.first ?? 0
+        guard count > 0 else { return 0 }
+        try db.execute("BEGIN")
+        do {
+            try db.run("DROP TABLE IF EXISTS temp.system_rollup")
+            try db.run("""
+                CREATE TEMP TABLE system_rollup AS
+                WITH m AS (
+                    SELECT *, battery_percent - LAG(battery_percent) OVER (ORDER BY at) AS delta,
+                           at - LAG(at) OVER (ORDER BY at) AS dt, LAG(on_ac) OVER (ORDER BY at) AS previous_ac
+                    FROM system_samples WHERE rolled = 0 AND at < ?
+                )
+                SELECT MIN(at) AS at, MIN(day) AS day, SUM(interval) AS interval,
+                       SUM(battery_percent * interval) / SUM(CASE WHEN battery_percent IS NOT NULL THEN interval END) AS battery_percent,
+                       on_ac, charging,
+                       SUM(battery_watts * interval) / SUM(CASE WHEN battery_watts IS NOT NULL THEN interval END) AS battery_watts,
+                       MAX(battery_temp) AS battery_temp, MAX(cycle_count) AS cycle_count, MAX(health) AS health,
+                       SUM(cpu * interval) / SUM(interval) AS cpu, SUM(mem_used * interval) / SUM(interval) AS mem_used,
+                       MAX(mem_total) AS mem_total, MAX(swap_used) AS swap_used, MIN(disk_free) AS disk_free,
+                       MAX(disk_total) AS disk_total, MAX(thermal) AS thermal,
+                       SUM(CASE WHEN on_ac = 0 AND previous_ac = 0 AND dt <= 300 AND delta <= 0 THEN -delta ELSE 0 END) AS drain_pct,
+                       SUM(CASE WHEN on_ac = 0 AND previous_ac = 0 AND dt <= 300 AND delta <= 0 THEN dt ELSE 0 END) AS drain_sec
+                FROM m
+                GROUP BY CAST(at / 3600 AS INTEGER), on_ac, charging, COALESCE(battery_percent >= 99, 0), thermal >= 2
+                """, [cutoff])
+            try db.run("DELETE FROM system_samples WHERE rolled = 0 AND at < ?", [cutoff])
+            try db.run("""
+                INSERT INTO system_samples(at, day, interval, battery_percent, on_ac, charging, battery_watts, battery_temp,
+                    cycle_count, health, cpu, mem_used, mem_total, swap_used, disk_free, disk_total, thermal, rolled,
+                    drain_pct, drain_sec)
+                SELECT at, day, interval, battery_percent, on_ac, charging, battery_watts, battery_temp, cycle_count, health,
+                       cpu, mem_used, mem_total, swap_used, disk_free, disk_total, thermal, 1, drain_pct, drain_sec
+                FROM temp.system_rollup
+                """)
+            try db.run("DROP TABLE temp.system_rollup")
+            try db.execute("COMMIT")
+        } catch {
+            try? db.execute("ROLLBACK")
+            throw error
+        }
+        return count
     }
 
     // MARK: - Recording
@@ -231,16 +292,21 @@ public final class SystemStore {
             window) { ($0.int(0), $0.int(1)) }.first
         if let cycles, cycles.1 > 0 { report.cyclesAdded = Int(cycles.0) }
 
-        // Drain: battery drop between consecutive minutes while unplugged (gaps from sleep are skipped).
-        let drain = try db.query(
+        // Drain: battery drop between consecutive minutes while unplugged (gaps from sleep are skipped); rolled-up
+        // hours carry their own.
+        let minuteDrain = try db.query(
             """
             SELECT COALESCE(SUM(-delta), 0), COALESCE(SUM(dt), 0) FROM (
                 SELECT battery_percent - LAG(battery_percent) OVER (ORDER BY at) AS delta,
                        at - LAG(at) OVER (ORDER BY at) AS dt,
                        on_ac, LAG(on_ac) OVER (ORDER BY at) AS previous_ac
-                FROM system_samples WHERE \(inWindow) AND battery_percent IS NOT NULL)
+                FROM system_samples WHERE \(inWindow) AND battery_percent IS NOT NULL AND rolled = 0)
             WHERE on_ac = 0 AND previous_ac = 0 AND dt <= 300 AND delta <= 0
             """, window) { ($0.double(0), $0.double(1)) }.first ?? (0, 0)
+        let rolledDrain = try db.query(
+            "SELECT COALESCE(SUM(drain_pct), 0), COALESCE(SUM(drain_sec), 0) FROM system_samples WHERE \(inWindow) AND rolled = 1",
+            window) { ($0.double(0), $0.double(1)) }.first ?? (0, 0)
+        let drain = (minuteDrain.0 + rolledDrain.0, minuteDrain.1 + rolledDrain.1)
         if drain.1 >= 600 {
             let perHour = drain.0 / (drain.1 / 3600)
             report.drainPerHour = perHour
@@ -251,7 +317,8 @@ public final class SystemStore {
             """
             SELECT COALESCE(SUM(CASE WHEN on_ac = 0 THEN interval ELSE 0 END), 0),
                    COALESCE(SUM(CASE WHEN on_ac = 1 AND battery_percent >= 99 THEN interval ELSE 0 END), 0),
-                   AVG(CASE WHEN on_ac = 0 AND battery_watts < 0 THEN -battery_watts END),
+                   SUM(CASE WHEN on_ac = 0 AND battery_watts < 0 THEN -battery_watts * interval END)
+                       / SUM(CASE WHEN on_ac = 0 AND battery_watts < 0 THEN interval END),
                    COUNT(CASE WHEN on_ac = 0 AND battery_watts < 0 THEN 1 END),
                    MAX(battery_temp), COUNT(battery_temp)
             FROM system_samples WHERE \(inWindow) AND battery_percent IS NOT NULL
@@ -268,7 +335,7 @@ public final class SystemStore {
 
         let load = try db.query(
             """
-            SELECT AVG(cpu), MAX(cpu), MAX(CASE WHEN mem_total > 0 THEN mem_used / mem_total ELSE 0 END), MAX(swap_used),
+            SELECT SUM(cpu * interval) / SUM(interval), MAX(cpu), MAX(CASE WHEN mem_total > 0 THEN mem_used / mem_total ELSE 0 END), MAX(swap_used),
                    COALESCE(SUM(CASE WHEN thermal >= 2 THEN interval ELSE 0 END), 0)
             FROM system_samples WHERE \(inWindow)
             """, window) { ($0.double(0), $0.double(1), $0.double(2), $0.double(3), $0.double(4)) }.first
